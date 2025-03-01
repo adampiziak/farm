@@ -650,8 +650,19 @@ fn generate_map(
                 .get(0)
                 .expect("if lower is len 1, higher should have 5 members");
 
-            let is_adjecent = (lowest_hex_index as i32 - *next_lowest_index as i32).abs() == 1
-                || (lowest_hex_index + next_lowest_index) == 5;
+            let indexes = (lowest_hex_index, next_lowest_index);
+
+            let mut is_adjecent = (lowest_hex_index as i32 - *next_lowest_index as i32).abs() == 1;
+
+            match indexes {
+                (0, 5) => {
+                    is_adjecent = true;
+                }
+                (5, 0) => {
+                    is_adjecent = true;
+                }
+                _ => {}
+            };
 
             if !is_adjecent {
                 river_hexes.push(h);
