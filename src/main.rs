@@ -2,9 +2,10 @@ use bevy::prelude::*;
 
 use bevy::dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin};
 use bevy::pbr::{ExtendedMaterial, MaterialExtension};
+use bevy::reflect::Map;
 use bevy::render::mesh::MeshVertexBufferLayoutRef;
 use bevy::render::render_resource::{RenderPipelineDescriptor, SpecializedMeshPipelineError};
-use bevy::utils::HashSet;
+use bevy::utils::{HashMap, HashSet};
 use bevy::{
     asset::RenderAssetUsages,
     pbr::wireframe::{Wireframe, WireframePlugin},
@@ -32,11 +33,11 @@ use spade::{DelaunayTriangulation, Point2, Triangulation};
 use terrain::{Chunk, HexVertex};
 
 const HEX_RADIUS: f32 = 1.0;
-const MAP_SIZE: [i32; 4] = [-300, 300, -250, 250];
+// const MAP_SIZE: [i32; 4] = [-300, 300, -250, 250];
 // const MAP_SIZE: [i32; 4] = [-300, 300, -300, 300];
 // const MAP_SIZE: [i32; 4] = [-100, 100, -100, 100];
 // const MAP_SIZE: [i32; 4] = [-150, 150, -150, 150];
-// const MAP_SIZE: [i32; 4] = [-20, 20, -20, 20];
+const MAP_SIZE: [i32; 4] = [-50, 50, -50, 50];
 
 pub const SHADER_ASSET_PATH: &str = "hexagon_shader.wgsl";
 
@@ -512,7 +513,6 @@ fn generate_map(
         for (i, reg) in faces.iter_mut().enumerate() {
             let shape = &shapes[i];
             if shape.contains(&pt) {
-                // println!("REGION {i} contains point");
                 reg.tiles.insert(t);
                 break;
             }
@@ -527,79 +527,34 @@ fn generate_map(
     let seed2 = rng.gen_range(0_u32..=1000000);
     let mut noise1 = BasicMulti::<SuperSimplex>::new(seed2);
     // let mut noise1 = RidgedMulti::<SuperSimplex>::new(seed2);
-    noise1.frequency = 0.02;
+    noise1.frequency = 0.008;
     noise1 = noise1.set_octaves(8);
     // noise1.octaves = 1;
-    // let amp = rng.gen_range(0_f64..16.0);
+    let amp = 32.0;
 
     for reg in faces {
         println!("REG");
-        // {
-        //     let vers: Vec<[f32; 3]> = reg
-        //         .edges
-        //         .clone()
-        //         .into_iter()
-        //         .map(|(e1, e2)| [e1.x, 10.0, e1.y])
-        //         .collect();
-        //     let m = Mesh::new(PrimitiveTopology::LineList, RenderAssetUsages::all())
-        //         .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, vers)
-        //         .with_inserted_indices(Indices::U32(reg.indices));
-        //     commands.spawn((
-        //         Mesh3d(meshes.add(m)),
-        //         MeshMaterial3d(materials.add(Color::srgb(1.0, 0.0, 0.0))),
-        //     ));
-        // }
         let mut chunk = Chunk::default();
-        // let base = rng.gen_range(0_f64..4.0);
-        let amp = rng.gen_range(1_f64..30.0);
-        // let mut amp = 400.0;
-        // if amp > 6.0 {
-        //     amp *= 1.5;
-        // }
-        noise1 = noise1.set_frequency(rng.gen_range(0.003_f64..0.03));
-        // amp /= 8.0;
-        // let mut pos = layout.hex_to_world_pos(hex);
-        // println!("REGION CENTER IS {:?}", center);
-        // println!("J IS {j}");
+        // let amp = rng.gen_range(1_f64..30.0);
+        // noise1 = noise1.set_frequency(rng.gen_range(0.003_f64..0.03));
         let sdfs = reg.edges;
-        // println!("SDF LEN IS {}", sdfs.len());
         for hex in reg.tiles {
-            // let dis_center = (reg.center.distance_to(hex) as f32) * 0.0001;
-            // // amp = f1 * amp + f2 * 2.0;
-            // if k < 5 {
-            //     println!("DIS {:?}", dis_center);
-            //     println!("F1 {:?} F2 {:?} AMP {}", f1, f2, amp);
-            //     println!("tile {:?}", hex);
-            // }
-            // k += 1;
             let pos = layout.hex_to_world_pos(hex);
-            // let f1 = (1.0);
-            // let mut hex_height = noise1.get([pos.x as f64, pos.y as f64]);
-            // let mut hex_height = 1.0;
-            // hex_height *= amp;
-            // hex_height += base;
+            // let tile_height = noise1.get([pos.x as f64, pos.y as f64]);
             let mut index_map: Vec<u32> = Vec::new();
             for vertex in &hex_template_positions {
-                // if dis < 1000.0 {
-                //     f1 = 1.0;
-                // }
-
                 let x1 = vertex[0] + pos.x;
                 let y1 = vertex[2] + pos.y;
-                // let dis = ((center.x - x1).powi(2) + (center.y - y1).powi(2)).sqrt();
                 let dis = sdf_dis(&sdfs, Vec2::new(x1, y1));
-                // let diff = (dis - 45.0).max(0.0);
                 let f1 = (1.0 / (1.0 + dis.abs().powf(1.5) * 0.005)) as f64;
                 let f2 = 1.0 - f1;
                 let mut h = noise1.get([x1 as f64, y1 as f64]);
                 let sign = if h < 0.0 { -1.0 } else { 1.0 };
                 h = h.powf(2.0) * sign * 2.0;
-                // let mut h = 1.0;
                 let ampf = amp * f2;
                 h = ampf * h + 0.5 * f1;
                 h += ampf / 5.0;
                 if h < 0.0 {
-                    // h = (1.0 / (1.0 - h * 0.1)) - 1.0;
                     h /= 4.0;
                 }
                 h += 0.5;
@@ -650,9 +605,94 @@ fn generate_map(
                 mod_color: LinearRgba::new(modc, modc, modc, 1.0),
             },
         });
+        // commands.spawn((
+        //     Mesh3d(meshes.add(mesh)),
+        //     MeshMaterial3d(shader_mat.clone()),
+        //     Terrain,
+        // ));
+    }
+
+    // RIVER GENERATION
+    let rect_hexes: Vec<hex::Hex> = hexx::shapes::pointy_rectangle(MAP_SIZE).collect();
+    let mut tile_heightmap: HashMap<Hex, f64> = HashMap::new();
+    for h in &rect_hexes {
+        let pos = layout.hex_to_world_pos(*h);
+        let tile_height = noise1.get([pos.x as f64, pos.y as f64]);
+        tile_heightmap.insert(*h, tile_height * amp);
+    }
+
+    let mut river_hexes: Vec<Hex> = Vec::new();
+    let mut non_river_hexes: Vec<Hex> = Vec::new();
+
+    // iterate over all hexes
+    for h in rect_hexes {
+        let Some(hex_height) = tile_heightmap.get(&h) else {
+            continue;
+        };
+        let mut lower = Vec::new();
+        let mut higher = Vec::new();
+
+        for (i, neighbor_hex) in h.all_neighbors().into_iter().enumerate() {
+            let neighbor_height = tile_heightmap.get(&neighbor_hex).unwrap_or(hex_height);
+
+            if neighbor_height < hex_height {
+                lower.push((i, neighbor_height));
+            } else {
+                higher.push((i, neighbor_height));
+            }
+        }
+
+        higher.sort_by_key(|h| h.0);
+
+        if lower.len() == 1 {
+            let lowest_hex_index = lower.get(0).unwrap().0;
+            let (next_lowest_index, _) = higher
+                .get(0)
+                .expect("if lower is len 1, higher should have 5 members");
+
+            let is_adjecent = (lowest_hex_index as i32 - *next_lowest_index as i32).abs() == 1
+                || (lowest_hex_index + next_lowest_index) == 5;
+
+            if !is_adjecent {
+                river_hexes.push(h);
+                continue;
+            }
+        }
+        non_river_hexes.push(h);
+    }
+
+    let cube_size = 1.2;
+    // cube mesh
+    let hexagon_mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::all())
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, hex_template_positions)
+        .with_inserted_indices(Indices::U16(hex_template_indices));
+    let mesh_handle = meshes.add(hexagon_mesh);
+    // let rivercube = meshes.add(Cuboid::new(cube_size, cube_size, cube_size));
+    // blue
+    let blue = materials.add(Color::srgb(0.0, 0.0, 1.0));
+    let green = materials.add(Color::srgb(0.0, 1.0, 0.0));
+
+    for river_hex in river_hexes {
+        let pos = layout.hex_to_world_pos(river_hex);
+        let Some(hex_height) = tile_heightmap.get(&river_hex) else {
+            continue;
+        };
         commands.spawn((
-            Mesh3d(meshes.add(mesh)),
-            MeshMaterial3d(shader_mat.clone()),
+            Mesh3d(mesh_handle.clone()),
+            MeshMaterial3d(blue.clone()),
+            Transform::from_xyz(pos.x, *hex_height as f32 + 1.0, pos.y),
+            Terrain,
+        ));
+    }
+    for river_hex in non_river_hexes {
+        let pos = layout.hex_to_world_pos(river_hex);
+        let Some(hex_height) = tile_heightmap.get(&river_hex) else {
+            continue;
+        };
+        commands.spawn((
+            Mesh3d(mesh_handle.clone()),
+            MeshMaterial3d(green.clone()),
+            Transform::from_xyz(pos.x, *hex_height as f32 + 1.0, pos.y),
             Terrain,
         ));
     }
@@ -733,9 +773,14 @@ fn move_player(input: Res<ButtonInput<KeyCode>>, mut player: Query<&mut Transfor
 
 fn setup_camera(mut commands: Commands) {
     commands
+        // .spawn((
+        //     Player,
+        //     Transform::from_xyz(4., 700.0, 430.0),
+        //     Visibility::default(),
+        // ))
         .spawn((
             Player,
-            Transform::from_xyz(4., 700.0, 430.0),
+            Transform::from_xyz(4., 200.0, 130.0),
             Visibility::default(),
         ))
         .with_children(|parent| {
