@@ -652,19 +652,19 @@ fn generate_map(
 
             let indexes = (lowest_hex_index, next_lowest_index);
 
-            let mut is_adjecent = (lowest_hex_index as i32 - *next_lowest_index as i32).abs() == 1;
+            let mut is_adjacent = (lowest_hex_index as i32 - *next_lowest_index as i32).abs() == 1;
 
             match indexes {
                 (0, 5) => {
-                    is_adjecent = true;
+                    is_adjacent = true;
                 }
                 (5, 0) => {
-                    is_adjecent = true;
+                    is_adjacent = true;
                 }
                 _ => {}
             };
 
-            if !is_adjecent {
+            if !is_adjacent {
                 river_hexes.push(h);
                 continue;
             }
