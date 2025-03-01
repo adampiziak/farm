@@ -615,15 +615,54 @@ fn generate_map(
     // RIVER GENERATION
     let rect_hexes: Vec<hex::Hex> = hexx::shapes::pointy_rectangle(MAP_SIZE).collect();
     let mut tile_heightmap: HashMap<Hex, f64> = HashMap::new();
+    let mut tile_watermap: HashMap<Hex, f64> = HashMap::new();
     for h in &rect_hexes {
         let pos = layout.hex_to_world_pos(*h);
         let tile_height = noise1.get([pos.x as f64, pos.y as f64]);
         tile_heightmap.insert(*h, tile_height * amp);
+        tile_watermap.insert(*h, 0.0);
     }
 
     let mut river_hexes: Vec<Hex> = Vec::new();
     let mut non_river_hexes: Vec<Hex> = Vec::new();
 
+    // PARTICLE ALGO
+
+    // Spawn 1000 water droplets
+    for _ in 0..100000 {
+        // println!("WATER");
+        let rand_x = rng.gen_range(min_hex.x..max_hex.x);
+        let rand_y = rng.gen_range(min_hex.y..max_hex.y);
+
+        let mut cursor_hex = layout.world_pos_to_hex(Vec2::new(rand_x, rand_y));
+        // break at 10000 just in case inifinite loop
+        for _ in 0..10000 {
+            if let Some(water_height) = tile_watermap.get_mut(&cursor_hex) {
+                *water_height += 0.001;
+            }
+            let Some(hex_height) = tile_heightmap.get(&cursor_hex) else {
+                continue;
+            };
+
+            let mut neighbor_heights = Vec::new();
+
+            for neighbor_hex in cursor_hex.all_neighbors() {
+                let neighbor_height = tile_heightmap.get(&neighbor_hex).unwrap_or(hex_height);
+                neighbor_heights.push((neighbor_hex, neighbor_height));
+            }
+            neighbor_heights.sort_by_key(|n| (n.1 * 1000.0) as i32); //cannot sort f64, so sort by i32
+
+            // if lower point exists, then go to tile
+            let (lowest_neighbor, lowest_neighbor_height) = neighbor_heights.get(0).unwrap();
+            if hex_height >= *lowest_neighbor_height {
+                cursor_hex = *lowest_neighbor;
+            } else {
+                break;
+            }
+        }
+    }
+
+    // ADJACENT ALGO
     // iterate over all hexes
     for h in rect_hexes {
         let Some(hex_height) = tile_heightmap.get(&h) else {
@@ -682,31 +721,46 @@ fn generate_map(
     // blue
     let blue = materials.add(Color::srgb(0.0, 0.0, 1.0));
     let green = materials.add(Color::srgb(0.0, 1.0, 0.0));
+    for (river_hex, river_height) in tile_watermap {
+        let pos = layout.hex_to_world_pos(river_hex);
+        let water_blue_level: f32 = river_height.min(1.0) as f32;
+        let grass_level: f32 = 1.0 - water_blue_level;
+        let watercolor = materials.add(Color::srgb(0.0, grass_level, water_blue_level));
+        let Some(hex_height) = tile_heightmap.get(&river_hex) else {
+            continue;
+        };
+        commands.spawn((
+            Mesh3d(mesh_handle.clone()),
+            MeshMaterial3d(watercolor),
+            Transform::from_xyz(pos.x, *hex_height as f32 + 1.0, pos.y),
+            Terrain,
+        ));
+    }
 
-    for river_hex in river_hexes {
-        let pos = layout.hex_to_world_pos(river_hex);
-        let Some(hex_height) = tile_heightmap.get(&river_hex) else {
-            continue;
-        };
-        commands.spawn((
-            Mesh3d(mesh_handle.clone()),
-            MeshMaterial3d(blue.clone()),
-            Transform::from_xyz(pos.x, *hex_height as f32 + 1.0, pos.y),
-            Terrain,
-        ));
-    }
-    for river_hex in non_river_hexes {
-        let pos = layout.hex_to_world_pos(river_hex);
-        let Some(hex_height) = tile_heightmap.get(&river_hex) else {
-            continue;
-        };
-        commands.spawn((
-            Mesh3d(mesh_handle.clone()),
-            MeshMaterial3d(green.clone()),
-            Transform::from_xyz(pos.x, *hex_height as f32 + 1.0, pos.y),
-            Terrain,
-        ));
-    }
+    // for river_hex in river_hexes {
+    //     let pos = layout.hex_to_world_pos(river_hex);
+    //     let Some(hex_height) = tile_heightmap.get(&river_hex) else {
+    //         continue;
+    //     };
+    //     commands.spawn((
+    //         Mesh3d(mesh_handle.clone()),
+    //         MeshMaterial3d(blue.clone()),
+    //         Transform::from_xyz(pos.x, *hex_height as f32 + 1.0, pos.y),
+    //         Terrain,
+    //     ));
+    // }
+    // for river_hex in non_river_hexes {
+    //     let pos = layout.hex_to_world_pos(river_hex);
+    //     let Some(hex_height) = tile_heightmap.get(&river_hex) else {
+    //         continue;
+    //     };
+    //     commands.spawn((
+    //         Mesh3d(mesh_handle.clone()),
+    //         MeshMaterial3d(green.clone()),
+    //         Transform::from_xyz(pos.x, *hex_height as f32 + 1.0, pos.y),
+    //         Terrain,
+    //     ));
+    // }
 }
 
 fn setup_lighting(mut commands: Commands) {
