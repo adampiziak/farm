@@ -2,36 +2,18 @@ use art::CustomMaterial;
 use bevy::prelude::*;
 
 use bevy::dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin};
-use bevy::pbr::{ExtendedMaterial, MaterialExtension};
-use bevy::reflect::Map;
-use bevy::render::mesh::MeshVertexBufferLayoutRef;
-use bevy::render::render_resource::{RenderPipelineDescriptor, SpecializedMeshPipelineError};
-use bevy::utils::{HashMap, HashSet};
+use bevy::pbr::ExtendedMaterial;
 use bevy::{
-    asset::RenderAssetUsages,
     pbr::wireframe::{Wireframe, WireframePlugin},
     render::{
-        mesh::{Indices, PrimitiveTopology},
-        render_resource::{AsBindGroup, ShaderRef},
         settings::{WgpuFeatures, WgpuSettings},
         RenderPlugin,
     },
     text::FontSmoothing,
 };
-use geo::{coord, Contains, Coord, LineString, Polygon};
 use misc::MapData;
-use spade::handles::{VoronoiVertex::Inner, VoronoiVertex::Outer};
 
-use fast_poisson::Poisson2D;
-use hexx::{hex, Hex, HexLayout};
-use math::generate_subdivided_hexagon;
-use noise::{BasicMulti, MultiFractal, NoiseFn, SuperSimplex};
 use noisy_bevy::NoisyShaderPlugin;
-use rand::seq::SliceRandom;
-use rand::{thread_rng, Rng};
-use spade::handles::VoronoiVertex;
-use spade::{DelaunayTriangulation, Point2, Triangulation};
-use terrain::{Chunk, HexVertex};
 
 pub const HEX_RADIUS: f32 = 1.0;
 pub const MAP_SIZE: [i32; 4] = [-200, 200, -200, 200];
