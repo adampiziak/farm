@@ -1,7 +1,23 @@
+use bevy::{
+    asset::RenderAssetUsages,
+    pbr::ExtendedMaterial,
+    prelude::*,
+    render::mesh::{Indices, PrimitiveTopology},
+};
+use fast_poisson::Poisson2D;
+use geo::{coord, Contains, Coord, LineString};
+use noise::{BasicMulti, MultiFractal, NoiseFn, SuperSimplex};
+use rand::{seq::SliceRandom, thread_rng, Rng};
+use spade::{handles::VoronoiVertex, DelaunayTriangulation, Point2, Triangulation};
+
 use std::hash::{Hash, Hasher};
 
 use bevy::utils::HashSet;
-use hexx::Hex;
+use hexx::{hex, Hex, HexLayout};
+
+use crate::{
+    art::CustomMaterial, math::generate_subdivided_hexagon, sdf_dis, Terrain, HEX_RADIUS, MAP_SIZE,
+};
 
 pub mod erosion;
 
@@ -63,4 +79,417 @@ pub struct Chunk {
     pub vertex_set: HashSet<HexVertex>,
     pub vertices: Vec<[f32; 3]>,
     pub indices: Vec<u32>,
+}
+#[derive(Default)]
+struct VRegion {
+    center: Vec2,
+    vertices: HashSet<(HashF32, HashF32)>,
+    edges: Vec<(Vec2, Vec2)>,
+    indices: Vec<u32>,
+    tiles: HashSet<Hex>,
+}
+#[derive(Default, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Clone, Copy)]
+pub(crate) struct HashF32 {
+    integral: i32,
+    fractional: i32,
+}
+
+const HPER: f32 = 1000000000.0;
+
+impl From<f32> for HashF32 {
+    fn from(value: f32) -> Self {
+        let sign = if value < 0.0 { -1 } else { 1 };
+        HashF32 {
+            integral: value.abs().floor() as i32 * sign,
+            fractional: (value.fract() * HPER) as i32,
+        }
+    }
+}
+
+impl Into<f32> for HashF32 {
+    fn into(self) -> f32 {
+        self.integral as f32 + self.fractional as f32 / HPER
+    }
+}
+fn to_coord(a: Vec2) -> Coord {
+    coord! {
+        x: a.x as f64,
+        y: a.y as f64
+    }
+}
+
+// Generate Voronoi regions
+// Claims hex tiles for each regions
+// Use simplex noise for terrain generation
+// stitch region borderes
+pub(crate) fn generate_map(
+    mut commands: Commands,
+    mut custom_materials: ResMut<Assets<ExtendedMaterial<StandardMaterial, CustomMaterial>>>,
+
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+) {
+    let layout = HexLayout::pointy().with_hex_size(1.0);
+    let mut rng = rand::thread_rng();
+
+    // Create all tiles and shuffle order
+    let mut rect_hexes: Vec<hex::Hex> = hexx::shapes::pointy_rectangle(MAP_SIZE).collect();
+    rect_hexes.shuffle(&mut thread_rng());
+
+    // Take first 10 as starting region locations
+    let mut rectangle_hexes = hexx::shapes::pointy_rectangle(MAP_SIZE).into_iter();
+
+    let min_hex = layout.hex_to_world_pos(rectangle_hexes.next().unwrap());
+    let max_hex = layout.hex_to_world_pos(rectangle_hexes.last().unwrap());
+    let padding = 000.0;
+    let width = (max_hex.x - min_hex.x) + padding * 2.0;
+    let height = (max_hex.y - min_hex.y) + padding * 2.0;
+    let reg_distance = 100.0;
+    let points = Poisson2D::new().with_dimensions([width as f64, height as f64], reg_distance);
+    let mut triangulation: DelaunayTriangulation<_> = DelaunayTriangulation::new();
+    for p in points {
+        let x: f32 = p[0] as f32 + min_hex.x - padding;
+        let y: f32 = p[1] as f32 + min_hex.y - padding;
+        triangulation
+            .insert(Point2::new(x as f64, y as f64))
+            .unwrap();
+    }
+
+    println!(
+        "VORONOI FACE COUNT: {}",
+        triangulation.voronoi_faces().len()
+    );
+    let rect_corners = vec![
+        min_hex,
+        Vec2::new(min_hex.x, max_hex.y),
+        max_hex,
+        Vec2::new(max_hex.x, min_hex.y),
+    ];
+
+    let rect_lines = vec![
+        [rect_corners[0], rect_corners[1]],
+        [rect_corners[1], rect_corners[2]],
+        [rect_corners[2], rect_corners[3]],
+        [rect_corners[3], rect_corners[0]],
+    ];
+
+    fn is_inner(pt2: Point2<f64>, corners: (Vec2, Vec2)) -> bool {
+        let x = pt2.x as f32;
+        let y = pt2.y as f32;
+        x > corners.0.x && x < corners.1.x && y > corners.0.y && y < corners.1.y
+    }
+
+    let corner_pts = (min_hex, max_hex);
+
+    let mut faces = Vec::new();
+
+    for face in triangulation.voronoi_faces() {
+        let mut vregion = VRegion::default();
+        let mut face_intersections = HashSet::new();
+        for edge in face.adjacent_edges() {
+            match edge.as_undirected().vertices() {
+                [VoronoiVertex::Inner(from), VoronoiVertex::Inner(to)] => {
+                    let mut from_pos = from.circumcenter();
+                    let mut to_pos = to.circumcenter();
+                    if !is_inner(from_pos, corner_pts) && !is_inner(to_pos, corner_pts) {
+                        continue;
+                    }
+                    let from_coord: geo::Coord<f32> = coord! {
+                        x: from_pos.x as f32,
+                        y: from_pos.y as f32
+                    };
+                    let to_coord: geo::Coord<f32> = coord! {
+                        x: to_pos.x as f32,
+                        y: to_pos.y as f32
+                    };
+
+                    let mut k = 0;
+
+                    for l in &rect_lines {
+                        let a1 = l[0];
+                        let a2 = l[1];
+
+                        let line1: geo::Line<f32> = geo::Line::new(
+                            coord! {x: a1.x as f32, y: a1.y as f32},
+                            coord! {x: a2.x as f32, y: a2.y as f32},
+                        );
+                        let line2 = geo::Line::new(from_coord, to_coord);
+                        if let Some(geo::LineIntersection::SinglePoint { intersection, .. }) =
+                            geo::line_intersection::line_intersection(line1, line2)
+                        {
+                            if !is_inner(to_pos, (min_hex, max_hex)) {
+                                to_pos.x = intersection.x as f64;
+                                to_pos.y = intersection.y as f64;
+                            } else {
+                                from_pos.x = intersection.x as f64;
+                                from_pos.y = intersection.y as f64;
+                            }
+
+                            face_intersections.insert(k);
+                            break;
+                        }
+                        k += 1;
+                    }
+
+                    let ver1 = (
+                        HashF32::from(from_pos.x as f32),
+                        HashF32::from(from_pos.y as f32),
+                    );
+                    let ver2 = (
+                        HashF32::from(to_pos.x as f32),
+                        HashF32::from(to_pos.y as f32),
+                    );
+                    vregion.vertices.insert(ver1);
+                    vregion.vertices.insert(ver2);
+                }
+                [VoronoiVertex::Inner(from), VoronoiVertex::Outer(edge)]
+                | [VoronoiVertex::Outer(edge), VoronoiVertex::Inner(from)] => {
+                    let from_pos = from.circumcenter();
+                    let edge_dir = edge.direction_vector();
+                    if !is_inner(from_pos, corner_pts) {
+                        continue;
+                    }
+                    let mut to_pos2 = None;
+
+                    let mut k = 0;
+                    for l in &rect_lines {
+                        let a1 = l[0];
+                        let a2 = l[1];
+                        let a3 = Vec2::new(from_pos.x as f32, from_pos.y as f32);
+                        let a4 = Vec2::new(edge_dir.x as f32, edge_dir.y as f32) * 2.0 + a3;
+
+                        let line1 =
+                            geo::Line::new(coord! {x: a1.x, y: a1.y}, coord! {x: a2.x, y: a2.y});
+                        let line2 =
+                            geo::Line::new(coord! {x: a3.x, y: a3.y}, coord! {x: a4.x, y: a4.y});
+
+                        if let Some(geo::LineIntersection::SinglePoint { intersection, .. }) =
+                            geo::line_intersection::line_intersection(line1, line2)
+                        {
+                            to_pos2 = Some(Vec2::new(intersection.x, intersection.y));
+                            face_intersections.insert(k);
+                        }
+                        k += 1;
+                    }
+
+                    if let Some(to_pos) = to_pos2 {
+                        let ver1 = (
+                            HashF32::from(from_pos.x as f32),
+                            HashF32::from(from_pos.y as f32),
+                        );
+                        let ver2 = (
+                            HashF32::from(to_pos.x as f32),
+                            HashF32::from(to_pos.y as f32),
+                        );
+                        vregion.vertices.insert(ver1);
+                        vregion.vertices.insert(ver2);
+                    }
+                }
+                [VoronoiVertex::Outer(_), VoronoiVertex::Outer(_)] => {}
+            }
+        }
+
+        let c = face.as_delaunay_vertex().position();
+        let center = Vec2::new(c.x as f32, c.y as f32);
+        let mut fpoints = Vec::new();
+        if face_intersections.len() == 2 {
+            let mut fls: Vec<u32> = face_intersections.into_iter().collect();
+            fls.sort();
+
+            let points = (fls[0], fls[1]);
+            let mut corner = None;
+            match points {
+                (0, 1) => corner = Some(rect_corners[1]),
+                (1, 2) => corner = Some(rect_corners[2]),
+                (2, 3) => corner = Some(rect_corners[3]),
+                (0, 3) => corner = Some(rect_corners[0]),
+                _ => {}
+            }
+
+            if let Some(cpt) = corner {
+                let theta = (cpt.y.atan2(cpt.x).to_degrees() * 10.0) as i32;
+                fpoints.push((cpt, theta));
+            }
+        }
+
+        for ver in &vregion.vertices {
+            let pt = Vec2::new(ver.0.into(), ver.1.into());
+            let offset = pt - center;
+            let theta = (offset.y.atan2(offset.x).to_degrees() * 10.0) as i32;
+            fpoints.push((pt, theta));
+        }
+
+        fpoints.sort_by_key(|k| k.1);
+
+        let mut fvers: Vec<[f32; 3]> = Vec::new();
+        let mut indices: Vec<u32> = Vec::new();
+        for (pt, _) in fpoints {
+            fvers.push([pt.x, 10.0, pt.y]);
+        }
+        for i in 0..(fvers.len()) {
+            let next = (i + 1) % fvers.len();
+
+            indices.push(i as u32);
+            indices.push(next as u32);
+            let ept1 = Vec2::new(fvers[i][0], fvers[i][2]);
+            let ept2 = Vec2::new(fvers[next][0], fvers[next][2]);
+            vregion.edges.push((ept1, ept2));
+        }
+        vregion.center = center;
+        vregion.indices = indices;
+
+        faces.push(vregion);
+    }
+
+    let bounding_rect_vertices: Vec<[f32; 3]> = rect_corners
+        .clone()
+        .into_iter()
+        .map(|p| [p[0] as f32, 10.0, p[1] as f32])
+        .collect();
+    let bounding_rect_indices = vec![0, 1, 1, 2, 2, 3, 3, 0];
+    let mesh = Mesh::new(PrimitiveTopology::LineList, RenderAssetUsages::all())
+        .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, bounding_rect_vertices)
+        .with_inserted_indices(Indices::U32(bounding_rect_indices));
+    commands.spawn((
+        Mesh3d(meshes.add(mesh)),
+        MeshMaterial3d(materials.add(Color::srgb(0.0, 0.0, 1.0))),
+    ));
+
+    let mut shapes = Vec::new();
+    for (_i, reg) in faces.iter().enumerate() {
+        let linestring: Vec<Coord> = reg
+            .edges
+            .clone()
+            .into_iter()
+            .map(|(e1, _)| to_coord(e1))
+            .collect();
+        let polygon = geo::Polygon::new(LineString::new(linestring), vec![]);
+        shapes.push(polygon);
+        //
+    }
+
+    // Claim tiles for regions
+    let mut tile_set: HashSet<Hex> = HashSet::new();
+    for t in rect_hexes {
+        tile_set.insert(t);
+    }
+
+    for t in tile_set {
+        let pos = layout.hex_to_world_pos(t);
+        let pt = geo::Point::new(pos.x as f64, pos.y as f64);
+        // println!("-------------");
+        for (i, reg) in faces.iter_mut().enumerate() {
+            let shape = &shapes[i];
+            if shape.contains(&pt) {
+                reg.tiles.insert(t);
+                break;
+            }
+        }
+    }
+    println!("DONE");
+    let radius = HEX_RADIUS;
+    let subdivisions = 0;
+    // Generate map
+    let (hex_template_positions, _uvs, hex_template_indices, _hex_vertex_weights) =
+        generate_subdivided_hexagon(radius.into(), subdivisions);
+    let seed2 = rng.gen_range(0_u32..=1000000);
+    let mut noise1 = BasicMulti::<SuperSimplex>::new(seed2);
+    // let mut noise1 = RidgedMulti::<SuperSimplex>::new(seed2);
+    noise1.frequency = 0.008;
+    noise1 = noise1.set_octaves(8);
+    // noise1.octaves = 1;
+    let amp = 32.0;
+
+    for reg in faces {
+        println!("REG");
+        let mut chunk = Chunk::default();
+        // let amp = rng.gen_range(1_f64..30.0);
+        // noise1 = noise1.set_frequency(rng.gen_range(0.003_f64..0.03));
+        let sdfs = reg.edges;
+        for hex in reg.tiles {
+            let pos = layout.hex_to_world_pos(hex);
+            let tile_height = noise1.get([pos.x as f64, pos.y as f64]) * amp;
+            let mut index_map: Vec<u32> = Vec::new();
+            for vertex in &hex_template_positions {
+                let x1 = vertex[0] + pos.x;
+                let y1 = vertex[2] + pos.y;
+                let dis = sdf_dis(&sdfs, Vec2::new(x1, y1));
+                let f1 = (1.0 / (1.0 + dis.abs().powf(1.5) * 0.005)) as f64;
+                let f2 = 1.0 - f1;
+                let mut h = noise1.get([x1 as f64, y1 as f64]);
+                let sign = if h < 0.0 { -1.0 } else { 1.0 };
+                h = h.powf(2.0) * sign * 2.0;
+                let ampf = amp * f2;
+                h = ampf * h + 0.5 * f1;
+                h += ampf / 5.0;
+                if h < 0.0 {
+                    h /= 4.0;
+                }
+                h += 0.5;
+                // let mut hex_vertex = HexVertex::new(vertex[0] + pos.x, h as f32, vertex[2] + pos.y);
+                let mut hex_vertex =
+                    HexVertex::new(vertex[0] + pos.x, tile_height as f32, vertex[2] + pos.y);
+
+                if !crate::SHARE_VERTICES || !chunk.vertex_set.contains(&hex_vertex) {
+                    let index = chunk.vertices.len();
+                    hex_vertex.index = index;
+                    chunk.vertex_set.insert(hex_vertex);
+                    chunk.vertices.push(hex_vertex.as_array());
+                } else {
+                    if let Some(vi) = chunk.vertex_set.get(&hex_vertex) {
+                        hex_vertex = *vi;
+                    }
+                }
+
+                // if let Some(vi) = chunk.vertex_set.get(&hex_vertex) {
+                //     hex_vertex = *vi;
+                // } else {
+                //     let index = chunk.vertices.len();
+                //     hex_vertex.index = index;
+                //     chunk.vertex_set.insert(hex_vertex);
+                //     chunk.vertices.push(hex_vertex.as_array());
+                // }
+                // tile.vertices.push(hex_vertex);
+                index_map.push(hex_vertex.index as u32);
+            }
+            for ind in &hex_template_indices {
+                chunk.indices.push(index_map[*ind as usize]);
+            }
+        }
+        // println!("REGION {j} has {} tiles", { reg.tiles.len() });
+        let mut rng = rand::thread_rng();
+
+        let mut uvs: Vec<[f32; 2]> = Vec::new();
+
+        for v in &chunk.vertices {
+            uvs.push([v[0], v[2]])
+        }
+        let mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::all())
+            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, chunk.vertices.clone())
+            .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
+            .with_inserted_indices(Indices::U32(chunk.indices.clone()))
+            // .with_inserted_attribute(
+            //     Mesh::ATTRIBUTE_COLOR,
+            //     vec![[r, g, b, 1.0]; hex_template_positions.len()],
+            // )
+            .with_computed_normals();
+        let mut rand_g = rng.gen_range(0.0_f32..0.2);
+        let mut modc = 0.0;
+        if reg.center.y.abs() > 200.0 {
+            rand_g = 0.05;
+            modc = (reg.center.y.abs() - 200.0) as f32 / 300.00;
+        }
+        let shader_mat = custom_materials.add(ExtendedMaterial {
+            base: StandardMaterial::default(),
+            extension: CustomMaterial {
+                color: LinearRgba::new(0.05, rand_g, 0.05, 1.0),
+                mod_color: LinearRgba::new(modc, modc, modc, 1.0),
+            },
+        });
+        commands.spawn((
+            Mesh3d(meshes.add(mesh)),
+            MeshMaterial3d(shader_mat.clone()),
+            Terrain,
+        ));
+    }
 }
