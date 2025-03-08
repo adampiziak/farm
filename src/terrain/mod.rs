@@ -13,10 +13,12 @@ use spade::{handles::VoronoiVertex, DelaunayTriangulation, Point2, Triangulation
 use std::hash::{Hash, Hasher};
 
 use bevy::utils::HashSet;
-use hexx::{hex, Hex, HexLayout};
+use hexx::{hex, EdgeDirection, Hex, HexLayout};
 
 use crate::{
-    art::CustomMaterial, math::generate_subdivided_hexagon, sdf_dis, Terrain, HEX_RADIUS, MAP_SIZE,
+    art::CustomMaterial,
+    math::{generate_subdivided_hexagon, sdf_dis},
+    Terrain, HEX_RADIUS, MAP_SIZE,
 };
 
 pub mod erosion;
@@ -118,6 +120,11 @@ fn to_coord(a: Vec2) -> Coord {
     }
 }
 
+fn get_map_hexes() -> Vec<Hex> {
+    let rect_hexes: Vec<Hex> = hexx::shapes::pointy_rectangle(MAP_SIZE).collect();
+    rect_hexes
+}
+
 // Generate Voronoi regions
 // Claims hex tiles for each regions
 // Use simplex noise for terrain generation
@@ -155,10 +162,7 @@ pub(crate) fn generate_map(
             .unwrap();
     }
 
-    println!(
-        "VORONOI FACE COUNT: {}",
-        triangulation.voronoi_faces().len()
-    );
+    // World corners
     let rect_corners = vec![
         min_hex,
         Vec2::new(min_hex.x, max_hex.y),
@@ -173,6 +177,7 @@ pub(crate) fn generate_map(
         [rect_corners[3], rect_corners[0]],
     ];
 
+    //// Voronoi Regions ////
     fn is_inner(pt2: Point2<f64>, corners: (Vec2, Vec2)) -> bool {
         let x = pt2.x as f32;
         let y = pt2.y as f32;
@@ -181,7 +186,7 @@ pub(crate) fn generate_map(
 
     let corner_pts = (min_hex, max_hex);
 
-    let mut faces = Vec::new();
+    let mut voronoi_regions = Vec::new();
 
     for face in triangulation.voronoi_faces() {
         let mut vregion = VRegion::default();
@@ -338,9 +343,40 @@ pub(crate) fn generate_map(
         vregion.center = center;
         vregion.indices = indices;
 
-        faces.push(vregion);
+        voronoi_regions.push(vregion);
     }
 
+    //// Assign tiles to Voronoi Regions ////
+    let mut shapes = Vec::new();
+    for (_i, reg) in voronoi_regions.iter().enumerate() {
+        let linestring: Vec<Coord> = reg
+            .edges
+            .clone()
+            .into_iter()
+            .map(|(e1, _)| to_coord(e1))
+            .collect();
+        let polygon = geo::Polygon::new(LineString::new(linestring), vec![]);
+        shapes.push(polygon);
+    }
+    let mut tile_set: HashSet<Hex> = HashSet::new();
+    for t in rect_hexes {
+        tile_set.insert(t);
+    }
+
+    for t in tile_set {
+        let pos = layout.hex_to_world_pos(t);
+        let pt = geo::Point::new(pos.x as f64, pos.y as f64);
+        // println!("-------------");
+        for (i, reg) in voronoi_regions.iter_mut().enumerate() {
+            let shape = &shapes[i];
+            if shape.contains(&pt) {
+                reg.tiles.insert(t);
+                break;
+            }
+        }
+    }
+
+    //// Draw World Boundry ////
     let bounding_rect_vertices: Vec<[f32; 3]> = rect_corners
         .clone()
         .into_iter()
@@ -355,60 +391,29 @@ pub(crate) fn generate_map(
         MeshMaterial3d(materials.add(Color::srgb(0.0, 0.0, 1.0))),
     ));
 
-    let mut shapes = Vec::new();
-    for (_i, reg) in faces.iter().enumerate() {
-        let linestring: Vec<Coord> = reg
-            .edges
-            .clone()
-            .into_iter()
-            .map(|(e1, _)| to_coord(e1))
-            .collect();
-        let polygon = geo::Polygon::new(LineString::new(linestring), vec![]);
-        shapes.push(polygon);
-        //
-    }
-
-    // Claim tiles for regions
-    let mut tile_set: HashSet<Hex> = HashSet::new();
-    for t in rect_hexes {
-        tile_set.insert(t);
-    }
-
-    for t in tile_set {
-        let pos = layout.hex_to_world_pos(t);
-        let pt = geo::Point::new(pos.x as f64, pos.y as f64);
-        // println!("-------------");
-        for (i, reg) in faces.iter_mut().enumerate() {
-            let shape = &shapes[i];
-            if shape.contains(&pt) {
-                reg.tiles.insert(t);
-                break;
-            }
-        }
-    }
-    println!("DONE");
+    //// Generate hexagon tile vertices ////
     let radius = HEX_RADIUS;
     let subdivisions = 0;
-    // Generate map
     let (hex_template_positions, _uvs, hex_template_indices, _hex_vertex_weights) =
         generate_subdivided_hexagon(radius.into(), subdivisions);
-    let seed2 = rng.gen_range(0_u32..=1000000);
-    let mut noise1 = BasicMulti::<SuperSimplex>::new(seed2);
-    // let mut noise1 = RidgedMulti::<SuperSimplex>::new(seed2);
-    noise1.frequency = 0.008;
-    noise1 = noise1.set_octaves(8);
-    // noise1.octaves = 1;
-    let amp = 32.0;
 
-    for reg in faces {
-        println!("REG");
+    //// Procedural terrain generation ////
+    let seed = rng.gen_range(0_u32..=1000000);
+    let noise = BasicMulti::<SuperSimplex>::new(seed)
+        .set_octaves(6)
+        .set_frequency(0.008);
+    let amp = 8.0;
+    let mut chunks = Vec::new();
+
+    for region in voronoi_regions {
         let mut chunk = Chunk::default();
         // let amp = rng.gen_range(1_f64..30.0);
         // noise1 = noise1.set_frequency(rng.gen_range(0.003_f64..0.03));
-        let sdfs = reg.edges;
-        for hex in reg.tiles {
+        let sdfs = region.edges;
+        for hex in region.tiles {
             let pos = layout.hex_to_world_pos(hex);
-            let tile_height = noise1.get([pos.x as f64, pos.y as f64]) * amp;
+            let tile_height = (noise.get([pos.x as f64, pos.y as f64]) + 0.3) * amp;
+            let tile_height = tile_height.max(0.01);
             let mut index_map: Vec<u32> = Vec::new();
             for vertex in &hex_template_positions {
                 let x1 = vertex[0] + pos.x;
@@ -416,7 +421,7 @@ pub(crate) fn generate_map(
                 let dis = sdf_dis(&sdfs, Vec2::new(x1, y1));
                 let f1 = (1.0 / (1.0 + dis.abs().powf(1.5) * 0.005)) as f64;
                 let f2 = 1.0 - f1;
-                let mut h = noise1.get([x1 as f64, y1 as f64]);
+                let mut h = noise.get([x1 as f64, y1 as f64]);
                 let sign = if h < 0.0 { -1.0 } else { 1.0 };
                 h = h.powf(2.0) * sign * 2.0;
                 let ampf = amp * f2;
@@ -457,6 +462,67 @@ pub(crate) fn generate_map(
             }
         }
         // println!("REGION {j} has {} tiles", { reg.tiles.len() });
+        chunks.push(chunk);
+    }
+
+    // cube
+    let cube_size = 0.8;
+    let cube_color = materials.add(Color::srgb(0.0, 0.5, 1.0));
+    let cube = meshes.add(Cuboid::new(cube_size, cube_size, cube_size));
+    // let cube_tuple = (Mesh3d(cube.clone()), MeshMaterial3d(cube_color.clone()));
+
+    // Draw mountain splines
+    for _ in 0..1 {
+        let mut mountain_range = Vec::new();
+        let rand_x = rng.gen_range(-100..100);
+        let rand_y = rng.gen_range(-100..100);
+        let mut cursor_hex = hex(rand_x, rand_y);
+        let mut direction = 0.0;
+        let mut mountain_height = 10.0;
+
+        for _ in 0..100 {
+            let alter_height = rng.gen_range(-1.0_f32..1.0);
+            mountain_height += alter_height;
+            let pos = layout.hex_to_world_pos(cursor_hex);
+            let pos3 = Vec3::new(pos.x, mountain_height, pos.y);
+            mountain_range.push(pos3);
+
+            let alter_course = rng.gen_range(-0.3_f32..0.3);
+            direction += alter_course;
+
+            let dir = EdgeDirection::from_pointy_angle(direction);
+            let next_neighbor = cursor_hex.neighbor(dir);
+            cursor_hex = next_neighbor;
+        }
+
+        let spline_positions: Vec<[f32; 3]> = mountain_range
+            .into_iter()
+            .map(|p| [p.x, p.y, p.z])
+            .collect();
+
+        let mut indices: Vec<u32> = Vec::new();
+
+        for i in 0..(spline_positions.len() - 1) {
+            let next = (i + 1) % spline_positions.len();
+            let p = spline_positions[i];
+            indices.push(i as u32);
+            indices.push(next as u32);
+            commands.spawn((
+                Mesh3d(cube.clone()),
+                MeshMaterial3d(cube_color.clone()),
+                Transform::from_xyz(p[0], p[1], p[2]),
+            ));
+        }
+        let mesh = Mesh::new(PrimitiveTopology::LineList, RenderAssetUsages::all())
+            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, spline_positions)
+            .with_inserted_indices(Indices::U32(indices));
+        commands.spawn((
+            Mesh3d(meshes.add(mesh)),
+            MeshMaterial3d(materials.add(Color::srgb(1.0, 0.0, 0.0))),
+        ));
+    }
+
+    for chunk in chunks {
         let mut rng = rand::thread_rng();
 
         let mut uvs: Vec<[f32; 2]> = Vec::new();
@@ -475,10 +541,10 @@ pub(crate) fn generate_map(
             .with_computed_normals();
         let mut rand_g = rng.gen_range(0.0_f32..0.2);
         let mut modc = 0.0;
-        if reg.center.y.abs() > 200.0 {
-            rand_g = 0.05;
-            modc = (reg.center.y.abs() - 200.0) as f32 / 300.00;
-        }
+        // if region.center.y.abs() > 200.0 {
+        //     rand_g = 0.05;
+        //     modc = (region.center.y.abs() - 200.0) as f32 / 300.00;
+        // }
         let shader_mat = custom_materials.add(ExtendedMaterial {
             base: StandardMaterial::default(),
             extension: CustomMaterial {

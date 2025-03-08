@@ -81,50 +81,6 @@ fn main() {
         .run();
 }
 
-fn distance_squared(a: Vec2, b: Vec2) -> f32 {
-    (a.x - b.x).powi(2) + (a.y - b.y).powi(2)
-}
-
-fn distance_to_segment(p: Vec2, a: Vec2, b: Vec2) -> f32 {
-    let ab = Vec2 {
-        x: b.x - a.x,
-        y: b.y - a.y,
-    };
-    let ap = Vec2 {
-        x: p.x - a.x,
-        y: p.y - a.y,
-    };
-    let ab_len2 = ab.x * ab.x + ab.y * ab.y;
-
-    if ab_len2 == 0.0 {
-        return distance_squared(p, a).sqrt(); // a and b are the same point
-    }
-
-    let t = ((ap.x * ab.x + ap.y * ab.y) / ab_len2).clamp(0.0, 1.0);
-    let closest = Vec2 {
-        x: a.x + t * ab.x,
-        y: a.y + t * ab.y,
-    };
-    distance_squared(p, closest).sqrt()
-}
-
-fn sdf_dis(sdfs: &Vec<(Vec2, Vec2)>, point: Vec2) -> f32 {
-    let mut min_dis: f32 = 10000.0;
-    for line in sdfs {
-        let dis = distance_to_segment(point, line.0, line.1);
-        if dis < 0.1 {
-            return 0.0;
-        }
-
-        if dis < min_dis {
-            min_dis = dis;
-        }
-    }
-    // println!("{min_dis}");
-
-    return min_dis;
-}
-
 fn setup_lighting(mut commands: Commands) {
     commands.insert_resource(AmbientLight {
         color: bevy::color::palettes::css::GHOST_WHITE.into(),
