@@ -10,6 +10,7 @@ use geo::{coord, Contains, Coord, LineString};
 use noise::{BasicMulti, MultiFractal, NoiseFn, SuperSimplex};
 use rand::Rng;
 use spade::{handles::VoronoiVertex, DelaunayTriangulation, Point2, Triangulation};
+use uuid::Uuid;
 
 use std::hash::{Hash, Hasher};
 
@@ -30,6 +31,7 @@ pub struct Tile {
     pub hex: Hex,
     pub position: [f32; 3],
     pub chunk_index: usize,
+    pub region: Uuid,
 }
 
 impl Tile {
@@ -85,6 +87,7 @@ pub struct Chunk {
 }
 #[derive(Default)]
 struct VRegion {
+    id: Uuid,
     center: Vec2,
     vertices: HashSet<(HashF32, HashF32)>,
     edges: Vec<(Vec2, Vec2)>,
@@ -172,7 +175,7 @@ pub(crate) fn generate_map(
     // Voronoi Region Generation
     // 1. Generate randomly distributed points with minimum
     //    separation between points
-    // 2. Extract Voronoi Regions from delaunay triangulation
+    // 2. Extract Voronoi Regions fro:m delaunay triangulation
     let mut voronoi_regions = create_voronoi_regions(
         min_hex,
         max_hex,
@@ -207,6 +210,9 @@ pub(crate) fn generate_map(
             let shape = &shapes[i];
             if shape.contains(&pt) {
                 reg.tiles.insert(t);
+                if let Some(mt) = tiles.get_mut(&t) {
+                    mt.region = reg.id;
+                }
                 break;
             }
         }
@@ -242,9 +248,56 @@ pub(crate) fn generate_map(
     let amp = 8.0;
 
     // let mut chunks = Vec::new();
-    for tile in tiles.iter_mut() {
+    let mut chunks = HashMap::new();
+    for reg in voronoi_regions.iter() {
+        chunks.insert(reg.id, Chunk::default());
+    }
+    for region in voronoi_regions {
+        for hex in region.tiles {
+            if let Some(t) = tiles.get_mut(&hex) {
+                t.region = region.id;
+            }
+        }
+    }
+
+    for (hex, tile) in tiles.iter_mut() {
+        if let Some(tile_chunk) = chunks.get_mut(&tile.region) {
+            let pos = layout.hex_to_world_pos(*hex);
+            let tile_height = (noise.get([pos.x as f64, pos.y as f64]) + 0.3) * amp;
+            let mut index_map: Vec<u32> = Vec::new();
+            for vertex in &hex_template_positions {
+                let x1 = vertex[0] + pos.x;
+                let y1 = vertex[2] + pos.y;
+                let mut hex_vertex =
+                    HexVertex::new(vertex[0] + pos.x, tile_height as f32, vertex[2] + pos.y);
+                let index = tile_chunk.vertices.len();
+                hex_vertex.index = index;
+                tile.vertices.push(hex_vertex);
+                tile_chunk.vertices.push(hex_vertex.as_array());
+                index_map.push(hex_vertex.index as u32);
+                // tile_chunk.vertices.push(hex_vertex.as_array());
+            }
+            for ind in &hex_template_indices {
+                tile_chunk.indices.push(index_map[*ind as usize]);
+            }
+        }
         //
     }
+
+    // test random tile height manipulation
+    for _ in 0..20 {
+        let rand_x = rng.gen_range(-100..100);
+        let rand_y = rng.gen_range(-100..100);
+        let rand_hex = hex(rand_x, rand_y);
+        if let Some(t) = tiles.get_mut(&rand_hex) {
+            if let Some(chunk_ref) = chunks.get_mut(&t.region) {
+                for v in t.vertices.iter() {
+                    chunk_ref.vertices[v.index][1] = 20.0;
+                }
+            }
+        }
+    }
+
     /*
     for region in voronoi_regions {
         let mut chunk = Chunk::default();
@@ -363,8 +416,7 @@ pub(crate) fn generate_map(
             MeshMaterial3d(materials.add(Color::srgb(1.0, 0.0, 0.0))),
         ));
     }
-    /*
-    for chunk in chunks {
+    for (_, chunk) in chunks {
         let mut rng = rand::thread_rng();
 
         let mut uvs: Vec<[f32; 2]> = Vec::new();
@@ -400,7 +452,6 @@ pub(crate) fn generate_map(
             Terrain,
         ));
     }
-    */
 }
 
 fn create_voronoi_regions(
@@ -435,6 +486,7 @@ fn create_voronoi_regions(
 
     for face in triangulation.voronoi_faces() {
         let mut vregion = VRegion::default();
+        vregion.id = Uuid::new_v4();
         let mut face_intersections = HashSet::new();
         for edge in face.adjacent_edges() {
             match edge.as_undirected().vertices() {
