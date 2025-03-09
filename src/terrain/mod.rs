@@ -263,6 +263,7 @@ pub(crate) fn generate_map(
     for (hex, tile) in tiles.iter_mut() {
         if let Some(tile_chunk) = chunks.get_mut(&tile.region) {
             let pos = layout.hex_to_world_pos(*hex);
+            tile.position = [pos.x, 0.0, pos.y];
             let tile_height = (noise.get([pos.x as f64, pos.y as f64]) + 0.3) * amp;
             let mut index_map: Vec<u32> = Vec::new();
             for vertex in &hex_template_positions {
@@ -367,7 +368,7 @@ pub(crate) fn generate_map(
     // let cube_tuple = (Mesh3d(cube.clone()), MeshMaterial3d(cube_color.clone()));
 
     // Draw mountain splines
-    for _ in 0..1 {
+    for _ in 0..5 {
         let mut mountain_range = Vec::new();
         let rand_x = rng.gen_range(-100..100);
         let rand_y = rng.gen_range(-100..100);
@@ -391,6 +392,7 @@ pub(crate) fn generate_map(
         }
 
         let spline_positions: Vec<[f32; 3]> = mountain_range
+            .clone()
             .into_iter()
             .map(|p| [p.x, p.y, p.z])
             .collect();
@@ -402,11 +404,11 @@ pub(crate) fn generate_map(
             let p = spline_positions[i];
             indices.push(i as u32);
             indices.push(next as u32);
-            commands.spawn((
-                Mesh3d(cube.clone()),
-                MeshMaterial3d(cube_color.clone()),
-                Transform::from_xyz(p[0], p[1], p[2]),
-            ));
+            // commands.spawn((
+            //     Mesh3d(cube.clone()),
+            //     MeshMaterial3d(cube_color.clone()),
+            //     Transform::from_xyz(p[0], p[1], p[2]),
+            // ));
         }
         let mesh = Mesh::new(PrimitiveTopology::LineList, RenderAssetUsages::all())
             .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, spline_positions)
@@ -415,6 +417,40 @@ pub(crate) fn generate_map(
             Mesh3d(meshes.add(mesh)),
             MeshMaterial3d(materials.add(Color::srgb(1.0, 0.0, 0.0))),
         ));
+
+        // modify tiles around mountain
+        let mut nearby_hexes = HashSet::new();
+        for node in &mountain_range {
+            let hex = layout.world_pos_to_hex(Vec2::new(node.x, node.z));
+            nearby_hexes.insert(hex);
+
+            for nearby in hex.range(20) {
+                nearby_hexes.insert(nearby);
+            }
+        }
+
+        for hex in nearby_hexes {
+            if let Some(t) = tiles.get_mut(&hex) {
+                if let Some(chunk_ref) = chunks.get_mut(&t.region) {
+                    let mut min_dis = 100000.0;
+                    let mut min_height = 10000.0;
+
+                    for n in &mountain_range {
+                        let dis = ((t.position[0] - n[0]).powi(2) + (t.position[2] - n[2]).powi(2));
+                        if dis < min_dis {
+                            min_dis = dis;
+                            min_height = n[1];
+                        }
+                    }
+
+                    for v in t.vertices.iter() {
+                        let factor = 1.0 / (1.0 + min_dis * 0.1);
+                        chunk_ref.vertices[v.index][1] += min_height * factor;
+                    }
+                }
+            }
+        }
+        // for
     }
     for (_, chunk) in chunks {
         let mut rng = rand::thread_rng();
