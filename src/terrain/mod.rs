@@ -245,7 +245,7 @@ pub(crate) fn generate_map(
     let noise = BasicMulti::<SuperSimplex>::new(seed)
         .set_octaves(6)
         .set_frequency(0.008);
-    let amp = 8.0;
+    let amp = 3.0;
 
     // let mut chunks = Vec::new();
     let mut chunks = HashMap::new();
@@ -286,18 +286,18 @@ pub(crate) fn generate_map(
     }
 
     // test random tile height manipulation
-    for _ in 0..20 {
-        let rand_x = rng.gen_range(-100..100);
-        let rand_y = rng.gen_range(-100..100);
-        let rand_hex = hex(rand_x, rand_y);
-        if let Some(t) = tiles.get_mut(&rand_hex) {
-            if let Some(chunk_ref) = chunks.get_mut(&t.region) {
-                for v in t.vertices.iter() {
-                    chunk_ref.vertices[v.index][1] = 20.0;
-                }
-            }
-        }
-    }
+    // for _ in 0..20 {
+    //     let rand_x = rng.gen_range(-100..100);
+    //     let rand_y = rng.gen_range(-100..100);
+    //     let rand_hex = hex(rand_x, rand_y);
+    //     if let Some(t) = tiles.get_mut(&rand_hex) {
+    //         if let Some(chunk_ref) = chunks.get_mut(&t.region) {
+    //             for v in t.vertices.iter() {
+    //                 chunk_ref.vertices[v.index][1] = 20.0;
+    //             }
+    //         }
+    //     }
+    // }
 
     /*
     for region in voronoi_regions {
@@ -368,22 +368,23 @@ pub(crate) fn generate_map(
     // let cube_tuple = (Mesh3d(cube.clone()), MeshMaterial3d(cube_color.clone()));
 
     // Draw mountain splines
-    for _ in 0..5 {
+    for _ in 0..10 {
         let mut mountain_range = Vec::new();
-        let rand_x = rng.gen_range(-100..100);
-        let rand_y = rng.gen_range(-100..100);
+        let rand_x = rng.gen_range(MAP_SIZE[0]..MAP_SIZE[1]);
+        let rand_y = rng.gen_range(MAP_SIZE[0]..MAP_SIZE[1]);
+        // let rand_y = rng.gen_range(-100..100);
         let mut cursor_hex = hex(rand_x, rand_y);
         let mut direction = 0.0;
         let mut mountain_height = 10.0;
 
-        for _ in 0..100 {
-            let alter_height = rng.gen_range(-1.0_f32..1.0);
+        for _ in 0..200 {
+            let alter_height = rng.gen_range(-2.0_f32..2.0);
             mountain_height += alter_height;
             let pos = layout.hex_to_world_pos(cursor_hex);
             let pos3 = Vec3::new(pos.x, mountain_height, pos.y);
             mountain_range.push(pos3);
 
-            let alter_course = rng.gen_range(-0.3_f32..0.3);
+            let alter_course = rng.gen_range(-0.4_f32..0.4);
             direction += alter_course;
 
             let dir = EdgeDirection::from_pointy_angle(direction);
@@ -413,10 +414,10 @@ pub(crate) fn generate_map(
         let mesh = Mesh::new(PrimitiveTopology::LineList, RenderAssetUsages::all())
             .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, spline_positions)
             .with_inserted_indices(Indices::U32(indices));
-        commands.spawn((
-            Mesh3d(meshes.add(mesh)),
-            MeshMaterial3d(materials.add(Color::srgb(1.0, 0.0, 0.0))),
-        ));
+        // commands.spawn((
+        //     Mesh3d(meshes.add(mesh)),
+        //     MeshMaterial3d(materials.add(Color::srgb(1.0, 0.0, 0.0))),
+        // ));
 
         // modify tiles around mountain
         let mut nearby_hexes = HashSet::new();
@@ -424,7 +425,7 @@ pub(crate) fn generate_map(
             let hex = layout.world_pos_to_hex(Vec2::new(node.x, node.z));
             nearby_hexes.insert(hex);
 
-            for nearby in hex.range(20) {
+            for nearby in hex.range(40) {
                 nearby_hexes.insert(nearby);
             }
         }
@@ -444,8 +445,8 @@ pub(crate) fn generate_map(
                     }
 
                     for v in t.vertices.iter() {
-                        let factor = 1.0 / (1.0 + min_dis * 0.1);
-                        chunk_ref.vertices[v.index][1] += min_height * factor;
+                        let mut factor = 1.0 / (1.0 + min_dis.powf(1.1) * 0.09);
+                        chunk_ref.vertices[v.index][1] += min_height * factor / 4.00;
                     }
                 }
             }
