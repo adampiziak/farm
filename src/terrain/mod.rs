@@ -3,11 +3,12 @@ use bevy::{
     pbr::ExtendedMaterial,
     prelude::*,
     render::mesh::{Indices, PrimitiveTopology},
+    utils::hashbrown::HashMap,
 };
 use fast_poisson::Poisson2D;
 use geo::{coord, Contains, Coord, LineString};
 use noise::{BasicMulti, MultiFractal, NoiseFn, SuperSimplex};
-use rand::{seq::SliceRandom, thread_rng, Rng};
+use rand::Rng;
 use spade::{handles::VoronoiVertex, DelaunayTriangulation, Point2, Triangulation};
 
 use std::hash::{Hash, Hasher};
@@ -136,48 +137,55 @@ pub(crate) fn generate_map(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    // Using Hexx crate for hexagon tile
+    // Hexagons have pointy top (towards -Z direction)
     let layout = HexLayout::pointy().with_hex_size(1.0);
-    let mut rng = rand::thread_rng();
+    let layout_tiles: Vec<hex::Hex> = hexx::shapes::pointy_rectangle(MAP_SIZE).collect();
 
-    // Create all tiles and shuffle order
-    let mut rect_hexes: Vec<hex::Hex> = hexx::shapes::pointy_rectangle(MAP_SIZE).collect();
-    rect_hexes.shuffle(&mut thread_rng());
-
-    // Take first 10 as starting region locations
-    let mut rectangle_hexes = hexx::shapes::pointy_rectangle(MAP_SIZE).into_iter();
-
-    let min_hex = layout.hex_to_world_pos(rectangle_hexes.next().unwrap());
-    let max_hex = layout.hex_to_world_pos(rectangle_hexes.last().unwrap());
-    let padding = 000.0;
-    let width = (max_hex.x - min_hex.x) + padding * 2.0;
-    let height = (max_hex.y - min_hex.y) + padding * 2.0;
-    let reg_distance = 100.0;
-    let points = Poisson2D::new().with_dimensions([width as f64, height as f64], reg_distance);
-    let mut triangulation: DelaunayTriangulation<_> = DelaunayTriangulation::new();
-    for p in points {
-        let x: f32 = p[0] as f32 + min_hex.x - padding;
-        let y: f32 = p[1] as f32 + min_hex.y - padding;
-        triangulation
-            .insert(Point2::new(x as f64, y as f64))
-            .unwrap();
+    // State for every tile
+    // - vertex heights
+    // - position
+    let mut tiles: HashMap<Hex, Tile> = HashMap::new();
+    for t in &layout_tiles {
+        tiles.insert(*t, Tile::default());
     }
 
-    // World corners
-    let rect_corners = vec![
+    // Get world boundry min and max corners from first and last hex
+    // in hexx layout
+    let min_hex = layout.hex_to_world_pos(*layout_tiles.iter().next().unwrap());
+    let max_hex = layout.hex_to_world_pos(*layout_tiles.iter().last().unwrap());
+    let world_width = max_hex.x - min_hex.x;
+    let world_height = max_hex.y - min_hex.y;
+    let world_corners = vec![
         min_hex,
         Vec2::new(min_hex.x, max_hex.y),
         max_hex,
         Vec2::new(max_hex.x, min_hex.y),
     ];
-
-    let rect_lines = vec![
-        [rect_corners[0], rect_corners[1]],
-        [rect_corners[1], rect_corners[2]],
-        [rect_corners[2], rect_corners[3]],
-        [rect_corners[3], rect_corners[0]],
+    let world_boundries = vec![
+        [world_corners[0], world_corners[1]],
+        [world_corners[1], world_corners[2]],
+        [world_corners[2], world_corners[3]],
+        [world_corners[3], world_corners[0]],
     ];
 
-    //// Voronoi Regions ////
+    // Voronoi Region Generation
+    // 1. Generate randomly distributed points with minimum
+    //    separation between points
+    // 2. Extract Voronoi Regions from delaunay triangulation
+    let min_separation = 100.0;
+    let points =
+        Poisson2D::new().with_dimensions([world_width as f64, world_height as f64], min_separation);
+    let mut triangulation: DelaunayTriangulation<_> = DelaunayTriangulation::new();
+    for p in points {
+        let x: f32 = p[0] as f32 + min_hex.x;
+        let y: f32 = p[1] as f32 + min_hex.y;
+        triangulation
+            .insert(Point2::new(x as f64, y as f64))
+            .unwrap();
+    }
+
+    // check if point is within world
     fn is_inner(pt2: Point2<f64>, corners: (Vec2, Vec2)) -> bool {
         let x = pt2.x as f32;
         let y = pt2.y as f32;
@@ -185,7 +193,6 @@ pub(crate) fn generate_map(
     }
 
     let corner_pts = (min_hex, max_hex);
-
     let mut voronoi_regions = Vec::new();
 
     for face in triangulation.voronoi_faces() {
@@ -210,7 +217,7 @@ pub(crate) fn generate_map(
 
                     let mut k = 0;
 
-                    for l in &rect_lines {
+                    for l in &world_boundries {
                         let a1 = l[0];
                         let a2 = l[1];
 
@@ -257,7 +264,7 @@ pub(crate) fn generate_map(
                     let mut to_pos2 = None;
 
                     let mut k = 0;
-                    for l in &rect_lines {
+                    for l in &world_boundries {
                         let a1 = l[0];
                         let a2 = l[1];
                         let a3 = Vec2::new(from_pos.x as f32, from_pos.y as f32);
@@ -304,10 +311,10 @@ pub(crate) fn generate_map(
             let points = (fls[0], fls[1]);
             let mut corner = None;
             match points {
-                (0, 1) => corner = Some(rect_corners[1]),
-                (1, 2) => corner = Some(rect_corners[2]),
-                (2, 3) => corner = Some(rect_corners[3]),
-                (0, 3) => corner = Some(rect_corners[0]),
+                (0, 1) => corner = Some(world_corners[1]),
+                (1, 2) => corner = Some(world_corners[2]),
+                (2, 3) => corner = Some(world_corners[3]),
+                (0, 3) => corner = Some(world_corners[0]),
                 _ => {}
             }
 
@@ -346,7 +353,7 @@ pub(crate) fn generate_map(
         voronoi_regions.push(vregion);
     }
 
-    //// Assign tiles to Voronoi Regions ////
+    // Assign tiles to Voronoi Regions ////
     let mut shapes = Vec::new();
     for (_i, reg) in voronoi_regions.iter().enumerate() {
         let linestring: Vec<Coord> = reg
@@ -359,8 +366,8 @@ pub(crate) fn generate_map(
         shapes.push(polygon);
     }
     let mut tile_set: HashSet<Hex> = HashSet::new();
-    for t in rect_hexes {
-        tile_set.insert(t);
+    for t in &layout_tiles {
+        tile_set.insert(*t);
     }
 
     for t in tile_set {
@@ -377,7 +384,7 @@ pub(crate) fn generate_map(
     }
 
     //// Draw World Boundry ////
-    let bounding_rect_vertices: Vec<[f32; 3]> = rect_corners
+    let bounding_rect_vertices: Vec<[f32; 3]> = world_corners
         .clone()
         .into_iter()
         .map(|p| [p[0] as f32, 10.0, p[1] as f32])
@@ -398,6 +405,7 @@ pub(crate) fn generate_map(
         generate_subdivided_hexagon(radius.into(), subdivisions);
 
     //// Procedural terrain generation ////
+    let mut rng = rand::thread_rng();
     let seed = rng.gen_range(0_u32..=1000000);
     let noise = BasicMulti::<SuperSimplex>::new(seed)
         .set_octaves(6)

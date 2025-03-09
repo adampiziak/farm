@@ -16,11 +16,11 @@ use misc::MapData;
 use noisy_bevy::NoisyShaderPlugin;
 
 pub const HEX_RADIUS: f32 = 1.0;
-pub const MAP_SIZE: [i32; 4] = [-200, 200, -200, 200];
+// pub const MAP_SIZE: [i32; 4] = [-200, 200, -200, 200];
+pub const MAP_SIZE: [i32; 4] = [-100, 100, -100, 100];
 pub const SHARE_VERTICES: bool = false;
 // const MAP_SIZE: [i32; 4] = [-300, 300, -300, 300];
 // const MAP_SIZE: [i32; 4] = [-400, 400, -400, 400];
-// const MAP_SIZE: [i32; 4] = [-100, 100, -100, 100];
 // const MAP_SIZE: [i32; 4] = [-150, 150, -150, 150];
 // const MAP_SIZE: [i32; 4] = [-50, 50, -50, 50];
 
