@@ -78,6 +78,22 @@ impl Hash for HexVertex {
     }
 }
 
+// WORLD
+// Store tiles
+// Utils for updating terrain
+#[derive(Default)]
+pub struct World {
+    tiles: HashSet<Hex>,
+}
+
+// REGION
+// Keep track of own tiles coords
+// utils for updating region
+#[derive(Default, Clone)]
+pub struct Region {
+    tiles: HashSet<Hex>,
+}
+
 #[derive(Default)]
 pub struct Chunk {
     pub id: u32,
@@ -283,6 +299,46 @@ pub(crate) fn generate_map(
             }
         }
         //
+    }
+
+    let mut neighbors = HashSet::new();
+    let mut near_border = HashMap::new();
+
+    for (hex, tile) in tiles.iter() {
+        let mut regions = HashSet::new();
+        regions.insert(tile.region);
+        for neighbor in hex.all_neighbors() {
+            if let Some(n) = tiles.get(&neighbor) {
+                regions.insert(n.region);
+            }
+        }
+        if regions.len() > 1 {
+            neighbors.insert(*hex);
+            for nearby in hex.range(10) {
+                let existing = near_border.entry(nearby).or_insert(100.0);
+                let dis = nearby.distance_to(*hex) as f64;
+                if dis < *existing {
+                    *existing = dis.max(1.0);
+                }
+            }
+        }
+    }
+
+    for (hex, tile) in tiles.iter() {
+        if neighbors.contains(hex) {
+            if let Some(chunk_ref) = chunks.get_mut(&tile.region) {
+                for v in tile.vertices.iter() {
+                    chunk_ref.vertices[v.index][1] = 5.0;
+                }
+            }
+        }
+        if let Some(val) = near_border.get(hex) {
+            if let Some(chunk_ref) = chunks.get_mut(&tile.region) {
+                for v in tile.vertices.iter() {
+                    chunk_ref.vertices[v.index][1] = (30.0 / (*val).powf(1.3) as f32).min(8.0);
+                }
+            }
+        }
     }
 
     // test random tile height manipulation
