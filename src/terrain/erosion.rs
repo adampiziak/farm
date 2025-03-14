@@ -6,7 +6,7 @@ use rand::Rng;
 
 use crate::{misc::EventTimer, MapData, MAP_SIZE};
 
-use super::Tile;
+use super::OldTile;
 
 #[derive(Default)]
 pub struct Drop {
@@ -37,14 +37,14 @@ impl Drop {
 #[derive(Default)]
 pub struct WorldTerrain {
     size: (i32, i32, i32, i32), // -x, x, -z, z
-    pub tiles: HashMap<(i32, i32), Tile>,
+    pub tiles: HashMap<(i32, i32), OldTile>,
 }
 
 impl WorldTerrain {
     pub fn set_size(&mut self, size: (i32, i32, i32, i32)) {
         self.size = size;
     }
-    pub fn set_heightmap(&mut self, tiles: HashMap<(i32, i32), Tile>) {
+    pub fn set_heightmap(&mut self, tiles: HashMap<(i32, i32), OldTile>) {
         self.tiles = tiles;
     }
     pub fn erode(&mut self, cycles: usize) {

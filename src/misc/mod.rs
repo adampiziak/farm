@@ -13,7 +13,7 @@ use hexx::{hex, HexLayout};
 use rand::Rng;
 
 use crate::math::generate_subdivided_hexagon;
-use crate::terrain::{Chunk, Tile};
+use crate::terrain::{Chunk, OldTile};
 
 #[derive(Resource)]
 pub struct EventTimer {
@@ -83,7 +83,7 @@ fn start_background(
                     }
                 }
             }
-            let mut tiles: Vec<Tile> = Vec::new();
+            let mut tiles: Vec<OldTile> = Vec::new();
 
             for (_, t) in &map.tiles {
                 tiles.push(t.clone());
@@ -159,7 +159,7 @@ pub struct MapData(pub Arc<RwLock<Map>>);
 #[derive(Default)]
 pub struct Map {
     pub chunks: Vec<Chunk>,
-    pub tiles: HashMap<(i32, i32), Tile>,
+    pub tiles: HashMap<(i32, i32), OldTile>,
     pub changed: VecDeque<(i32, i32)>,
 }
 

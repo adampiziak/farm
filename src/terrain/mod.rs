@@ -3,7 +3,7 @@ use bevy::{
     pbr::ExtendedMaterial,
     prelude::*,
     render::mesh::{Indices, PrimitiveTopology},
-    utils::hashbrown::HashMap,
+    utils::hashbrown::{HashMap, HashSet},
 };
 use fast_poisson::Poisson2D;
 use geo::{coord, Contains, Coord, LineString};
@@ -14,7 +14,6 @@ use uuid::Uuid;
 
 use std::hash::{Hash, Hasher};
 
-use bevy::utils::HashSet;
 use hexx::{hex, EdgeDirection, Hex, HexLayout};
 
 use crate::{
@@ -26,7 +25,7 @@ use crate::{
 pub mod erosion;
 
 #[derive(Default, Clone)]
-pub struct Tile {
+pub struct OldTile {
     pub vertices: Vec<HexVertex>,
     pub hex: Hex,
     pub position: [f32; 3],
@@ -34,7 +33,7 @@ pub struct Tile {
     pub region: Uuid,
 }
 
-impl Tile {
+impl OldTile {
     pub fn height(&self) -> f32 {
         self.position[1]
     }
@@ -83,7 +82,19 @@ impl Hash for HexVertex {
 // Utils for updating terrain
 #[derive(Default)]
 pub struct World {
-    tiles: HashSet<Hex>,
+    layout: HexLayout,
+    tiles: HashMap<Hex, Tile>,
+    info: WorldInfo,
+    regions: HashMap<Uuid, Region>,
+    chunks: HashMap<Uuid, Chunk>,
+}
+
+#[derive(Default, Clone, Copy)]
+pub struct WorldInfo {
+    min_hex: Vec2,
+    max_hex: Vec2,
+    width: f32,
+    height: f32,
 }
 
 // REGION
@@ -91,7 +102,16 @@ pub struct World {
 // utils for updating region
 #[derive(Default, Clone)]
 pub struct Region {
+    id: Uuid,
     tiles: HashSet<Hex>,
+}
+
+#[derive(Default, Clone)]
+pub struct Tile {
+    pub hex: Hex,
+    pub vertex_indices: Vec<usize>,
+    pub chunk_index: usize,
+    pub region: Uuid,
 }
 
 #[derive(Default)]
@@ -102,13 +122,121 @@ pub struct Chunk {
     pub indices: Vec<u32>,
 }
 #[derive(Default)]
-struct VRegion {
+struct VoronoiRegion {
     id: Uuid,
     center: Vec2,
     vertices: HashSet<(HashF32, HashF32)>,
     edges: Vec<(Vec2, Vec2)>,
     indices: Vec<u32>,
     tiles: HashSet<Hex>,
+}
+
+impl World {
+    fn new() -> World {
+        let layout = HexLayout::pointy().with_hex_size(1.0);
+        let layout_tiles: Vec<hex::Hex> = hexx::shapes::pointy_rectangle(MAP_SIZE).collect();
+        let tiles: HashMap<Hex, Tile> = hexx::shapes::pointy_rectangle(MAP_SIZE)
+            .map(|h| (h, Tile::default()))
+            .collect();
+        let mut info = WorldInfo::default();
+        let min_hex = layout.hex_to_world_pos(*layout_tiles.iter().next().unwrap());
+        let max_hex = layout.hex_to_world_pos(*layout_tiles.iter().last().unwrap());
+        println!("MIN HEX IS {}", min_hex);
+        println!("MAX HEX IS {}", max_hex);
+        let world_width = max_hex.x - min_hex.x;
+        let world_height = max_hex.y - min_hex.y;
+        info.width = world_width;
+        info.height = world_height;
+        info.min_hex = min_hex;
+        info.max_hex = max_hex;
+        World {
+            layout,
+            tiles,
+            info,
+            ..Default::default()
+        }
+    }
+
+    fn generate_regions(&mut self) {
+        let info = self.info;
+        let mut voronoi_regions =
+            create_voronoi_regions(info.min_hex, info.max_hex, info.width, info.height);
+        // Assign tiles to Voronoi Regions ////
+        let mut shapes = Vec::new();
+        for (_i, reg) in voronoi_regions.iter().enumerate() {
+            let linestring: Vec<Coord> = reg
+                .edges
+                .clone()
+                .into_iter()
+                .map(|(e1, _)| to_coord(e1))
+                .collect();
+            let polygon = geo::Polygon::new(LineString::new(linestring), vec![]);
+            shapes.push(polygon);
+        }
+        let mut tile_set: HashSet<Hex> = HashSet::new();
+        for (t, _) in &self.tiles {
+            tile_set.insert(*t);
+        }
+
+        for t in tile_set {
+            let pos = self.layout.hex_to_world_pos(t);
+            let pt = geo::Point::new(pos.x as f64, pos.y as f64);
+            // println!("-------------");
+            for (i, reg) in voronoi_regions.iter_mut().enumerate() {
+                let shape = &shapes[i];
+                if shape.contains(&pt) {
+                    reg.tiles.insert(t);
+                    break;
+                }
+            }
+        }
+
+        println!("WORLD HAS {} regions", { voronoi_regions.len() });
+        for vreg in voronoi_regions {
+            let mut reg = Region::default();
+            reg.id = vreg.id;
+            reg.tiles = vreg.tiles;
+
+            self.regions.insert(vreg.id, reg);
+        }
+    }
+
+    pub fn allocate_chunks(&mut self) {
+        // Hexagon template
+        let radius = HEX_RADIUS;
+        let subdivisions = 0;
+        let (hex_template_positions, _uvs, hex_template_indices, _hex_vertex_weights) =
+            generate_subdivided_hexagon(radius.into(), subdivisions);
+
+        for (id, reg) in &self.regions {
+            self.chunks.insert(*id, Chunk::default());
+            for hex in &reg.tiles {
+                if let Some(tile) = self.tiles.get_mut(hex) {
+                    tile.hex = *hex;
+                    tile.region = *id;
+                }
+            }
+        }
+
+        for (hex, tile) in self.tiles.iter_mut() {
+            if let Some(tile_chunk) = self.chunks.get_mut(&tile.region) {
+                let pos = self.layout.hex_to_world_pos(*hex);
+                let mut index_map: Vec<u32> = Vec::new();
+                for vertex in &hex_template_positions {
+                    let x1 = vertex[0] + pos.x;
+                    let y1 = vertex[2] + pos.y;
+                    let vertex_position = [x1, 0.0, y1];
+                    let index = tile_chunk.vertices.len();
+                    tile.vertex_indices.push(index);
+                    index_map.push(index as u32);
+                    tile_chunk.vertices.push(vertex_position);
+                }
+                for ind in &hex_template_indices {
+                    tile_chunk.indices.push(index_map[*ind as usize]);
+                }
+            }
+        }
+    }
 }
 #[derive(Default, Eq, PartialEq, Ord, PartialOrd, Hash, Debug, Clone, Copy)]
 pub(crate) struct HashF32 {
@@ -156,6 +284,11 @@ pub(crate) fn generate_map(
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
+    let mut world = World::new();
+    world.generate_regions();
+    world.allocate_chunks();
+
+    /*
     // Using Hexx crate for hexagon tile
     // Hexagons have pointy top (towards -Z direction)
     let layout = HexLayout::pointy().with_hex_size(1.0);
@@ -164,9 +297,9 @@ pub(crate) fn generate_map(
     // State for every tile
     // - vertex heights
     // - position
-    let mut tiles: HashMap<Hex, Tile> = HashMap::new();
+    let mut tiles: HashMap<Hex, OldTile> = HashMap::new();
     for t in &layout_tiles {
-        tiles.insert(*t, Tile::default());
+        tiles.insert(*t, OldTile::default());
     }
 
     // Get world boundry min and max corners from first and last hex
@@ -192,14 +325,7 @@ pub(crate) fn generate_map(
     // 1. Generate randomly distributed points with minimum
     //    separation between points
     // 2. Extract Voronoi Regions fro:m delaunay triangulation
-    let mut voronoi_regions = create_voronoi_regions(
-        min_hex,
-        max_hex,
-        world_width,
-        world_height,
-        world_boundries,
-        world_corners.clone(),
-    );
+    let mut voronoi_regions = create_voronoi_regions(min_hex, max_hex, world_width, world_height);
 
     // Assign tiles to Voronoi Regions ////
     let mut shapes = Vec::new();
@@ -509,7 +635,10 @@ pub(crate) fn generate_map(
         }
         // for
     }
-    for (_, chunk) in chunks {
+    */
+    println!("WORLD HAS {} chunks", world.chunks.len());
+    for (id, chunk) in world.chunks {
+        println!("SPAWNING CHUNK {id}");
         let mut rng = rand::thread_rng();
 
         let mut uvs: Vec<[f32; 2]> = Vec::new();
@@ -552,9 +681,19 @@ fn create_voronoi_regions(
     max_hex: Vec2,
     world_width: f32,
     world_height: f32,
-    world_boundries: Vec<[Vec2; 2]>,
-    world_corners: Vec<Vec2>,
-) -> Vec<VRegion> {
+) -> Vec<VoronoiRegion> {
+    let world_corners = vec![
+        min_hex,
+        Vec2::new(min_hex.x, max_hex.y),
+        max_hex,
+        Vec2::new(max_hex.x, min_hex.y),
+    ];
+    let world_boundries = vec![
+        [world_corners[0], world_corners[1]],
+        [world_corners[1], world_corners[2]],
+        [world_corners[2], world_corners[3]],
+        [world_corners[3], world_corners[0]],
+    ];
     let min_separation = 100.0;
     let points =
         Poisson2D::new().with_dimensions([world_width as f64, world_height as f64], min_separation);
@@ -578,7 +717,7 @@ fn create_voronoi_regions(
     let mut voronoi_regions = Vec::new();
 
     for face in triangulation.voronoi_faces() {
-        let mut vregion = VRegion::default();
+        let mut vregion = VoronoiRegion::default();
         vregion.id = Uuid::new_v4();
         let mut face_intersections = HashSet::new();
         for edge in face.adjacent_edges() {
