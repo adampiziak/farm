@@ -125,7 +125,7 @@ fn fragment(@location(0) position: vec3<f32>) -> @location(0) vec4<f32> {
         // r = grass[0]/gf;
         // g = 1/(1+h/10.0);
         let yf = 0.5 / pow(1 + h, 3.0);
-        let sf = 1.0 - 1.0 / (1 + (pow(h / 14.0, 4.0)));
+        let sf = 1.0 - 1.0 / (1 + (pow(h / 7.0, 4.0)));
         // let sf = 0.0;
         r += yf + sf;
         g += yf * 1.1 + sf ;

@@ -222,17 +222,18 @@ impl World {
     /// Modify each vertex at given hex
     /// let hex = hex(10, 10);
     /// world.modify_hex(hex, |x, y| noise.get([x,y]));
-    pub fn modify_tile<F>(&mut self, hex: Hex, f: F)
+    pub fn modify_tile<F>(&mut self, hex: Hex, mut f: F)
     where
-        F: Fn(f32, f32) -> f32,
+        F: FnMut(f32, f32, f32) -> f32,
     {
         if let Some(tile) = self.tiles.get(&hex) {
             if let Some(chunk) = self.chunks.get_mut(&tile.region) {
                 for ind in &tile.vertex_indices {
                     let i = *ind;
                     let x = chunk.vertices[i][0];
+                    let h = chunk.vertices[i][1];
                     let y = chunk.vertices[i][2];
-                    chunk.vertices[i][1] = f(x, y);
+                    chunk.vertices[i][1] = f(x, h, y);
                 }
             }
         }
@@ -241,7 +242,7 @@ impl World {
     pub fn allocate_chunks(&mut self) {
         // Hexagon template
         let radius = HEX_RADIUS;
-        let subdivisions = 0;
+        let subdivisions = 1;
         let (hex_template_positions, _uvs, hex_template_indices, _hex_vertex_weights) =
             generate_subdivided_hexagon(radius.into(), subdivisions);
 
@@ -312,7 +313,7 @@ fn to_coord(a: Vec2) -> Coord {
 pub(crate) fn generate_map(
     mut commands: Commands,
     mut custom_materials: ResMut<Assets<ExtendedMaterial<StandardMaterial, CustomMaterial>>>,
-
+    asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
 ) {
@@ -329,20 +330,26 @@ pub(crate) fn generate_map(
     let mut rng = rand::thread_rng();
     let seed = rng.gen_range(0_u32..=1000000);
     let noise = BasicMulti::<SuperSimplex>::new(seed)
-        .set_octaves(2)
-        .set_frequency(0.02);
+        .set_octaves(8)
+        .set_frequency(0.05);
+    let seed = rng.gen_range(0_u32..=1000000);
+    let mnoise = BasicMulti::<SuperSimplex>::new(seed)
+        .set_octaves(4)
+        .set_frequency(0.2);
 
     let amp = 2.0;
     for region in world.region_iter() {
         // region.biome.terraform();
         // let amp = rng.gen_range(0_f64..100.0);
         for hex in region.hex_iter() {
-            world.modify_tile(hex, |x, y| {
+            world.modify_tile(hex, |x, oh, y| {
                 let h = (noise.get([x as f64, y as f64]) * amp + amp / 3.0) as f32;
                 h.max(0.01)
             });
         }
     }
+
+    // TREE
 
     // MOUNTAINS
     let cube_size = 0.8;
@@ -351,18 +358,18 @@ pub(crate) fn generate_map(
     // let cube_tuple = (Mesh3d(cube.clone()), MeshMaterial3d(cube_color.clone()));
 
     // Draw mountain splines
-    for _ in 0..20 {
+    for _ in 0..5 {
         let mut mountain_range = Vec::new();
         let rand_x = rng.gen_range(MAP_SIZE[0]..MAP_SIZE[1]);
         let rand_y = rng.gen_range(MAP_SIZE[0]..MAP_SIZE[1]);
         // let rand_y = rng.gen_range(-100..100);
         let mut cursor_hex = hex(rand_x, rand_y);
-        let mut direction: f32 = 0.0;
+        let mut direction: f32 = rng.gen_range(-3.1_f32..3.1);
         let mut mountain_height = 10.0;
         let mut tangets = Vec::new();
         let amp = 16.0;
 
-        for _ in 0..6 {
+        for _ in 0..8 {
             let alter_height = rng.gen_range(-2.0_f32..2.0);
             mountain_height += alter_height;
             let pos = world.layout.hex_to_world_pos(cursor_hex);
@@ -374,7 +381,7 @@ pub(crate) fn generate_map(
                 direction.cos() * tang_amp,
             ));
 
-            let alter_course = rng.gen_range(-0.4_f32..0.4);
+            let alter_course = rng.gen_range(-1.0_f32..1.0);
             direction += alter_course;
 
             let new_pos = Vec2::new(pos.x + direction.sin() * amp, pos.y + direction.cos() * amp);
@@ -393,7 +400,7 @@ pub(crate) fn generate_map(
             .to_curve()
             .unwrap();
 
-        let positions: Vec<_> = hermite.iter_positions(70).collect();
+        let positions: Vec<_> = hermite.iter_positions(200).collect();
 
         let mut mountain_hexes = HashSet::new();
         let mut hill_hexes = HashSet::new();
@@ -404,19 +411,55 @@ pub(crate) fn generate_map(
         }
 
         for mh in &mountain_hexes {
-            for n in mh.all_neighbors() {
-                if !mountain_hexes.contains(&n) {
-                    hill_hexes.insert(n);
-                }
+            hill_hexes.insert(*mh);
+            for n in mh.range(6) {
+                hill_hexes.insert(n);
             }
+            // for n in mh.all_neighbors() {
+            //     if !mountain_hexes.contains(&n) {
+            //         hill_hexes.insert(n);
+            //     }
+            // }
         }
 
-        for h in mountain_hexes {
-            world.modify_tile(h, |_, _| 3.0);
-        }
+        let mut rand_positions = Vec::new();
+
         for h in hill_hexes {
-            world.modify_tile(h, |_, _| 2.0);
+            world.modify_tile(h, |x, oh, y| {
+                let mut min_dis = 1000.0;
+                for p in &positions {
+                    let dis = p.distance(Vec2::new(x, y));
+                    if dis < min_dis {
+                        min_dis = dis;
+                    }
+                }
+
+                // let offset = (mnoise.get([x as f64, y as f64])) as f32 * 2.0;
+                let f = (1.0 - (min_dis / (8.0)).min(1.0)).powf(1.2);
+
+                let h = (mnoise.get([x as f64, y as f64])) as f32;
+                let new_h = 5.0 * f + (1.0 - f) * oh + (f * (h + 1.0) * 2.0);
+                let rnd = rng.gen_range(0_f32..200.0);
+                if rnd < 1.0 {
+                    rand_positions.push(Vec3::new(x, new_h, y));
+                }
+                new_h
+            });
         }
+        let sc = 0.2;
+        for p in rand_positions {
+            if p.y < 5.0 {
+                commands.spawn((
+                    SceneRoot(
+                        asset_server.load(GltfAssetLabel::Scene(0).from_asset("tree/scene.gltf")),
+                    ),
+                    Transform::from_xyz(p.x, p.y, p.z).with_scale(Vec3::new(sc, sc, sc)),
+                ));
+            }
+        }
+        // for h in hill_hexes {
+        //     world.modify_tile(h, |_, _| 2.0);
+        // }
 
         let spline_positions: Vec<[f32; 3]> =
             positions.into_iter().map(|p| [p.x, 10.0, p.y]).collect();

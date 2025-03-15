@@ -163,7 +163,7 @@ fn setup_camera(mut commands: Commands) {
         // ))
         .spawn((
             Player,
-            Transform::from_xyz(4., 200.0, 130.0),
+            Transform::from_xyz(4., 30.0, 100.0),
             Visibility::default(),
         ))
         .with_children(|parent| {
