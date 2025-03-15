@@ -5,6 +5,7 @@ use bevy::{
     render::mesh::{Indices, PrimitiveTopology},
     utils::hashbrown::{HashMap, HashSet},
 };
+use biome::Biome;
 use fast_poisson::Poisson2D;
 use geo::{coord, Contains, Coord, LineString};
 use noise::{BasicMulti, MultiFractal, NoiseFn, SuperSimplex};
@@ -22,6 +23,7 @@ use crate::{
     Terrain, HEX_RADIUS, MAP_SIZE,
 };
 
+pub mod biome;
 pub mod erosion;
 
 #[derive(Default, Clone)]
@@ -104,6 +106,7 @@ pub struct WorldInfo {
 pub struct Region {
     id: Uuid,
     tiles: HashSet<Hex>,
+    biome: Biome,
 }
 
 impl Region {
@@ -301,11 +304,6 @@ fn to_coord(a: Vec2) -> Coord {
     }
 }
 
-fn get_map_hexes() -> Vec<Hex> {
-    let rect_hexes: Vec<Hex> = hexx::shapes::pointy_rectangle(MAP_SIZE).collect();
-    rect_hexes
-}
-
 // Generate Voronoi regions
 // Claims hex tiles for each regions
 // Use simplex noise for terrain generation
@@ -328,10 +326,54 @@ pub(crate) fn generate_map(
         .set_octaves(6)
         .set_frequency(0.008);
 
+    for (_, region) in world.regions.iter_mut() {
+        region.biome = Biome::random();
+    }
+
     for region in world.region_iter() {
-        let amp = rng.gen_range(0_f64..100.0);
-        for hex in region.hex_iter() {
-            world.modify_tile(hex, |x, y| (noise.get([x as f64, y as f64]) * amp) as f32);
+        // region.biome.terraform();
+        //     let amp = rng.gen_range(0_f64..100.0);
+        //     for hex in region.hex_iter() {
+        //         world.modify_tile(hex, |x, y| (noise.get([x as f64, y as f64]) * amp) as f32);
+        //     }
+    }
+
+    println!("WORLD HAS {} chunks", world.chunks.len());
+    for (id, chunk) in world.chunks {
+        if let Some(region) = world.regions.get(&id) {
+            let mut rng = rand::thread_rng();
+
+            let mut uvs: Vec<[f32; 2]> = Vec::new();
+
+            for v in &chunk.vertices {
+                uvs.push([v[0], v[2]])
+            }
+            let mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::all())
+                .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, chunk.vertices.clone())
+                .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
+                .with_inserted_indices(Indices::U32(chunk.indices.clone()))
+                // .with_inserted_attribute(
+                //     Mesh::ATTRIBUTE_COLOR,
+                //     vec![[r, g, b, 1.0]; hex_template_positions.len()],
+                // )
+                .with_computed_normals();
+            let mut rand_g = rng.gen_range(0.0_f32..0.2);
+            let mut modc = 0.0;
+            let color = Vec3::from(region.biome.kind.color());
+            println!("SPAWNING CHUNK {id}");
+            println!("color: {color:?}");
+            let shader_mat = custom_materials.add(ExtendedMaterial {
+                base: StandardMaterial::default(),
+                extension: CustomMaterial {
+                    color: LinearRgba::new(color.x, color.y, color.z, 1.0),
+                    mod_color: LinearRgba::new(modc, modc, modc, 1.0),
+                },
+            });
+            commands.spawn((
+                Mesh3d(meshes.add(mesh)),
+                MeshMaterial3d(shader_mat.clone()),
+                Terrain,
+            ));
         }
     }
 
@@ -683,44 +725,6 @@ pub(crate) fn generate_map(
         // for
     }
     */
-    println!("WORLD HAS {} chunks", world.chunks.len());
-    for (id, chunk) in world.chunks {
-        println!("SPAWNING CHUNK {id}");
-        let mut rng = rand::thread_rng();
-
-        let mut uvs: Vec<[f32; 2]> = Vec::new();
-
-        for v in &chunk.vertices {
-            uvs.push([v[0], v[2]])
-        }
-        let mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::all())
-            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, chunk.vertices.clone())
-            .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, uvs)
-            .with_inserted_indices(Indices::U32(chunk.indices.clone()))
-            // .with_inserted_attribute(
-            //     Mesh::ATTRIBUTE_COLOR,
-            //     vec![[r, g, b, 1.0]; hex_template_positions.len()],
-            // )
-            .with_computed_normals();
-        let mut rand_g = rng.gen_range(0.0_f32..0.2);
-        let mut modc = 0.0;
-        // if region.center.y.abs() > 200.0 {
-        //     rand_g = 0.05;
-        //     modc = (region.center.y.abs() - 200.0) as f32 / 300.00;
-        // }
-        let shader_mat = custom_materials.add(ExtendedMaterial {
-            base: StandardMaterial::default(),
-            extension: CustomMaterial {
-                color: LinearRgba::new(0.05, rand_g, 0.05, 1.0),
-                mod_color: LinearRgba::new(modc, modc, modc, 1.0),
-            },
-        });
-        commands.spawn((
-            Mesh3d(meshes.add(mesh)),
-            MeshMaterial3d(shader_mat.clone()),
-            Terrain,
-        ));
-    }
 }
 
 fn create_voronoi_regions(

@@ -16,8 +16,8 @@ use misc::MapData;
 use noisy_bevy::NoisyShaderPlugin;
 
 pub const HEX_RADIUS: f32 = 1.0;
-// pub const MAP_SIZE: [i32; 4] = [-200, 200, -200, 200];
-pub const MAP_SIZE: [i32; 4] = [-100, 100, -100, 100];
+pub const MAP_SIZE: [i32; 4] = [-200, 200, -200, 200];
+// pub const MAP_SIZE: [i32; 4] = [-100, 100, -100, 100];
 pub const SHARE_VERTICES: bool = false;
 // const MAP_SIZE: [i32; 4] = [-300, 300, -300, 300];
 // pub const MAP_SIZE: [i32; 4] = [-400, 400, -400, 400];
