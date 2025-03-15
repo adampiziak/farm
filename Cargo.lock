@@ -2335,6 +2335,7 @@ dependencies = [
  "rand_pcg 0.9.0",
  "spade",
  "splines",
+ "uniform-cubic-splines",
  "uuid",
 ]
 
@@ -3031,6 +3032,15 @@ name = "lazy_static"
 version = "1.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
+
+[[package]]
+name = "lerp"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ecc56a024593ecbcacb6bb4f8f4ace719eb08ae9b701535640ef3efb0e706260"
+dependencies = [
+ "num-traits 0.2.19",
+]
 
 [[package]]
 name = "lewton"
@@ -5077,6 +5087,16 @@ name = "unicode-xid"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ebc1c04c71510c7f702b52b7c350734c9ff1295c464a03335b00bb84fc54f853"
+
+[[package]]
+name = "uniform-cubic-splines"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4c6100493902e3b7240f9b383b309ff3de1c9c944f0bf79e207d93c4a4311b13"
+dependencies = [
+ "lerp",
+ "num-traits 0.2.19",
+]
 
 [[package]]
 name = "uuid"

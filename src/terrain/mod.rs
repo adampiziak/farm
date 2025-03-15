@@ -1,5 +1,6 @@
 use bevy::{
     asset::RenderAssetUsages,
+    math::cubic_splines,
     pbr::ExtendedMaterial,
     prelude::*,
     render::mesh::{Indices, PrimitiveTopology},
@@ -319,23 +320,162 @@ pub(crate) fn generate_map(
     world.generate_regions();
     world.allocate_chunks();
 
-    // Terrain modification
-    let mut rng = rand::thread_rng();
-    let seed = rng.gen_range(0_u32..=1000000);
-    let noise = BasicMulti::<SuperSimplex>::new(seed)
-        .set_octaves(6)
-        .set_frequency(0.008);
-
+    // BIOMES
     for (_, region) in world.regions.iter_mut() {
         region.biome = Biome::random();
     }
 
+    // GENERAL TERRAIN
+    let mut rng = rand::thread_rng();
+    let seed = rng.gen_range(0_u32..=1000000);
+    let noise = BasicMulti::<SuperSimplex>::new(seed)
+        .set_octaves(2)
+        .set_frequency(0.02);
+
+    let amp = 2.0;
     for region in world.region_iter() {
         // region.biome.terraform();
-        //     let amp = rng.gen_range(0_f64..100.0);
-        //     for hex in region.hex_iter() {
-        //         world.modify_tile(hex, |x, y| (noise.get([x as f64, y as f64]) * amp) as f32);
-        //     }
+        // let amp = rng.gen_range(0_f64..100.0);
+        for hex in region.hex_iter() {
+            world.modify_tile(hex, |x, y| {
+                let h = (noise.get([x as f64, y as f64]) * amp + amp / 3.0) as f32;
+                h.max(0.01)
+            });
+        }
+    }
+
+    // MOUNTAINS
+    let cube_size = 0.8;
+    let cube_color = materials.add(Color::srgb(0.0, 0.5, 1.0));
+    let cube = meshes.add(Cuboid::new(cube_size, cube_size, cube_size));
+    // let cube_tuple = (Mesh3d(cube.clone()), MeshMaterial3d(cube_color.clone()));
+
+    // Draw mountain splines
+    for _ in 0..20 {
+        let mut mountain_range = Vec::new();
+        let rand_x = rng.gen_range(MAP_SIZE[0]..MAP_SIZE[1]);
+        let rand_y = rng.gen_range(MAP_SIZE[0]..MAP_SIZE[1]);
+        // let rand_y = rng.gen_range(-100..100);
+        let mut cursor_hex = hex(rand_x, rand_y);
+        let mut direction: f32 = 0.0;
+        let mut mountain_height = 10.0;
+        let mut tangets = Vec::new();
+        let amp = 16.0;
+
+        for _ in 0..6 {
+            let alter_height = rng.gen_range(-2.0_f32..2.0);
+            mountain_height += alter_height;
+            let pos = world.layout.hex_to_world_pos(cursor_hex);
+            // let pos3 = Vec3::new(pos.x, mountain_height, pos.y);
+            mountain_range.push(pos);
+            let tang_amp = 20.0;
+            tangets.push(Vec2::new(
+                direction.sin() * tang_amp,
+                direction.cos() * tang_amp,
+            ));
+
+            let alter_course = rng.gen_range(-0.4_f32..0.4);
+            direction += alter_course;
+
+            let new_pos = Vec2::new(pos.x + direction.sin() * amp, pos.y + direction.cos() * amp);
+
+            // let dir = EdgeDirection::from_pointy_angle(direction);
+            let next_neighbor = world.layout.world_pos_to_hex(new_pos);
+            cursor_hex = next_neighbor;
+        }
+        // let tangents: Vec<Vec2> = mountain_range
+        //     .clone()
+        //     .into_iter()
+        //     .map(|p| Vec2::new(0.0, 10.0))
+        //     .collect();
+
+        let hermite = CubicHermite::new(mountain_range.clone(), tangets)
+            .to_curve()
+            .unwrap();
+
+        let positions: Vec<_> = hermite.iter_positions(70).collect();
+
+        let mut mountain_hexes = HashSet::new();
+        let mut hill_hexes = HashSet::new();
+
+        for pos in &positions {
+            let hex = world.layout.world_pos_to_hex(*pos);
+            mountain_hexes.insert(hex);
+        }
+
+        for mh in &mountain_hexes {
+            for n in mh.all_neighbors() {
+                if !mountain_hexes.contains(&n) {
+                    hill_hexes.insert(n);
+                }
+            }
+        }
+
+        for h in mountain_hexes {
+            world.modify_tile(h, |_, _| 3.0);
+        }
+        for h in hill_hexes {
+            world.modify_tile(h, |_, _| 2.0);
+        }
+
+        let spline_positions: Vec<[f32; 3]> =
+            positions.into_iter().map(|p| [p.x, 10.0, p.y]).collect();
+
+        let mut indices: Vec<u32> = Vec::new();
+
+        for i in 0..(spline_positions.len() - 1) {
+            let next = (i + 1) % spline_positions.len();
+            let p = spline_positions[i];
+            indices.push(i as u32);
+            indices.push(next as u32);
+            // commands.spawn((
+            //     Mesh3d(cube.clone()),
+            //     MeshMaterial3d(cube_color.clone()),
+            //     Transform::from_xyz(p[0], p[1], p[2]),
+            // ));
+        }
+        let mesh = Mesh::new(PrimitiveTopology::LineList, RenderAssetUsages::all())
+            .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, spline_positions)
+            .with_inserted_indices(Indices::U32(indices));
+        commands.spawn((
+            Mesh3d(meshes.add(mesh)),
+            MeshMaterial3d(materials.add(Color::srgb(1.0, 0.0, 0.0))),
+        ));
+
+        /*
+        // modify tiles around mountain
+        let mut nearby_hexes = HashSet::new();
+        for node in &mountain_range {
+            let hex = world.layout.world_pos_to_hex(Vec2::new(node.x, node.z));
+            nearby_hexes.insert(hex);
+
+            for nearby in hex.range(40) {
+                nearby_hexes.insert(nearby);
+            }
+        }
+
+        for hex in nearby_hexes {
+            if let Some(t) = tiles.get_mut(&hex) {
+                if let Some(chunk_ref) = chunks.get_mut(&t.region) {
+                    let mut min_dis = 100000.0;
+                    let mut min_height = 10000.0;
+
+                    for n in &mountain_range {
+                        let dis = ((t.position[0] - n[0]).powi(2) + (t.position[2] - n[2]).powi(2));
+                        if dis < min_dis {
+                            min_dis = dis;
+                            min_height = n[1];
+                        }
+                    }
+
+                    for v in t.vertices.iter() {
+                        let mut factor = 1.0 / (1.0 + min_dis.powf(1.1) * 0.09);
+                        chunk_ref.vertices[v.index][1] += min_height * factor / 4.00;
+                    }
+                }
+            }
+        }
+        */
     }
 
     println!("WORLD HAS {} chunks", world.chunks.len());
