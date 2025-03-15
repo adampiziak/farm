@@ -358,7 +358,7 @@ pub(crate) fn generate_map(
     // let cube_tuple = (Mesh3d(cube.clone()), MeshMaterial3d(cube_color.clone()));
 
     // Draw mountain splines
-    for _ in 0..5 {
+    for _ in 0..8 {
         let mut mountain_range = Vec::new();
         let rand_x = rng.gen_range(MAP_SIZE[0]..MAP_SIZE[1]);
         let rand_y = rng.gen_range(MAP_SIZE[0]..MAP_SIZE[1]);
