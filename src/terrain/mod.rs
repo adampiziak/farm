@@ -6,7 +6,7 @@ use bevy::{
     render::mesh::{Indices, PrimitiveTopology},
     utils::hashbrown::{HashMap, HashSet},
 };
-use biome::Biome;
+use biome::{Biome, BiomeKind};
 use fast_poisson::Poisson2D;
 use geo::{coord, Contains, Coord, LineString};
 use noise::{BasicMulti, MultiFractal, NoiseFn, SuperSimplex};
@@ -412,7 +412,7 @@ pub(crate) fn generate_map(
 
         for mh in &mountain_hexes {
             hill_hexes.insert(*mh);
-            for n in mh.range(6) {
+            for n in mh.range(8) {
                 hill_hexes.insert(n);
             }
             // for n in mh.all_neighbors() {
@@ -421,8 +421,6 @@ pub(crate) fn generate_map(
             //     }
             // }
         }
-
-        let mut rand_positions = Vec::new();
 
         for h in hill_hexes {
             world.modify_tile(h, |x, oh, y| {
@@ -439,22 +437,31 @@ pub(crate) fn generate_map(
 
                 let h = (mnoise.get([x as f64, y as f64])) as f32;
                 let new_h = 5.0 * f + (1.0 - f) * oh + (f * (h + 1.0) * 2.0);
-                let rnd = rng.gen_range(0_f32..200.0);
-                if rnd < 1.0 {
-                    rand_positions.push(Vec3::new(x, new_h, y));
-                }
                 new_h
             });
         }
         let sc = 0.2;
-        for p in rand_positions {
-            if p.y < 5.0 {
-                commands.spawn((
-                    SceneRoot(
-                        asset_server.load(GltfAssetLabel::Scene(0).from_asset("tree/scene.gltf")),
-                    ),
-                    Transform::from_xyz(p.x, p.y, p.z).with_scale(Vec3::new(sc, sc, sc)),
-                ));
+        for (id, chunk) in &world.chunks {
+            if let Some(reg) = world.regions.get(id) {
+                if reg.biome.kind != BiomeKind::Grasslands {
+                    continue;
+                }
+            }
+            for v in &chunk.vertices {
+                let rnd = rng.gen_range(0_u32..10000);
+                if rnd > 10 {
+                    continue;
+                }
+                let p = Vec3::from_array(*v);
+                if p.y < 3.8 {
+                    commands.spawn((
+                        SceneRoot(
+                            asset_server
+                                .load(GltfAssetLabel::Scene(0).from_asset("tree/scene.gltf")),
+                        ),
+                        Transform::from_xyz(p.x, p.y, p.z).with_scale(Vec3::new(sc, sc, sc)),
+                    ));
+                }
             }
         }
         // for h in hill_hexes {
@@ -482,7 +489,7 @@ pub(crate) fn generate_map(
             .with_inserted_indices(Indices::U32(indices));
         commands.spawn((
             Mesh3d(meshes.add(mesh)),
-            MeshMaterial3d(materials.add(Color::srgb(1.0, 0.0, 0.0))),
+            MeshMaterial3d(materials.add(Color::srgb(0.0, 0.0, 1.0))),
         ));
 
         /*

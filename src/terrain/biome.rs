@@ -6,7 +6,7 @@ pub struct Biome {
     pub kind: BiomeKind,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub enum BiomeKind {
     Desert,
     Tundra,
