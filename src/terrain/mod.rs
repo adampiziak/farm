@@ -106,6 +106,12 @@ pub struct Region {
     tiles: HashSet<Hex>,
 }
 
+impl Region {
+    pub fn hex_iter(&self) -> impl Iterator<Item = Hex> {
+        self.tiles.clone().into_iter()
+    }
+}
+
 #[derive(Default, Clone)]
 pub struct Tile {
     pub hex: Hex,
@@ -157,6 +163,14 @@ impl World {
         }
     }
 
+    fn region_iter(&self) -> impl Iterator<Item = Region> {
+        self.regions.clone().into_values()
+    }
+
+    fn hex_iter(&self) -> impl Iterator<Item = Hex> {
+        hexx::shapes::pointy_rectangle(MAP_SIZE)
+    }
+
     fn generate_regions(&mut self) {
         let info = self.info;
         let mut voronoi_regions =
@@ -198,6 +212,25 @@ impl World {
             reg.tiles = vreg.tiles;
 
             self.regions.insert(vreg.id, reg);
+        }
+    }
+
+    /// Modify each vertex at given hex
+    /// let hex = hex(10, 10);
+    /// world.modify_hex(hex, |x, y| noise.get([x,y]));
+    pub fn modify_tile<F>(&mut self, hex: Hex, f: F)
+    where
+        F: Fn(f32, f32) -> f32,
+    {
+        if let Some(tile) = self.tiles.get(&hex) {
+            if let Some(chunk) = self.chunks.get_mut(&tile.region) {
+                for ind in &tile.vertex_indices {
+                    let i = *ind;
+                    let x = chunk.vertices[i][0];
+                    let y = chunk.vertices[i][2];
+                    chunk.vertices[i][1] = f(x, y);
+                }
+            }
         }
     }
 
@@ -287,6 +320,20 @@ pub(crate) fn generate_map(
     let mut world = World::new();
     world.generate_regions();
     world.allocate_chunks();
+
+    // Terrain modification
+    let mut rng = rand::thread_rng();
+    let seed = rng.gen_range(0_u32..=1000000);
+    let noise = BasicMulti::<SuperSimplex>::new(seed)
+        .set_octaves(6)
+        .set_frequency(0.008);
+
+    for region in world.region_iter() {
+        let amp = rng.gen_range(0_f64..100.0);
+        for hex in region.hex_iter() {
+            world.modify_tile(hex, |x, y| (noise.get([x as f64, y as f64]) * amp) as f32);
+        }
+    }
 
     /*
     // Using Hexx crate for hexagon tile
