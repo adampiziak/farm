@@ -1,7 +1,9 @@
 use bevy::{
     asset::RenderAssetUsages,
+    color::palettes::css::{GREEN, LIMEGREEN, WHITE},
+    image::{ImageAddressMode, ImageLoaderSettings, ImageSampler, ImageSamplerDescriptor},
     math::cubic_splines,
-    pbr::ExtendedMaterial,
+    pbr::{ExtendedMaterial, OpaqueRendererMethod},
     prelude::*,
     render::mesh::{Indices, PrimitiveTopology},
     utils::hashbrown::{HashMap, HashSet},
@@ -19,7 +21,7 @@ use std::hash::{Hash, Hasher};
 use hexx::{hex, EdgeDirection, Hex, HexLayout};
 
 use crate::{
-    art::CustomMaterial,
+    art::{CustomMaterial, MyExtension},
     math::{generate_subdivided_hexagon, sdf_dis},
     Terrain, HEX_RADIUS, MAP_SIZE,
 };
@@ -242,7 +244,7 @@ impl World {
     pub fn allocate_chunks(&mut self) {
         // Hexagon template
         let radius = HEX_RADIUS;
-        let subdivisions = 1;
+        let subdivisions = 2;
         let (hex_template_positions, _uvs, hex_template_indices, _hex_vertex_weights) =
             generate_subdivided_hexagon(radius.into(), subdivisions);
 
@@ -313,6 +315,7 @@ fn to_coord(a: Vec2) -> Coord {
 pub(crate) fn generate_map(
     mut commands: Commands,
     mut custom_materials: ResMut<Assets<ExtendedMaterial<StandardMaterial, CustomMaterial>>>,
+    mut extended_materials: ResMut<Assets<ExtendedMaterial<StandardMaterial, MyExtension>>>,
     asset_server: Res<AssetServer>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut materials: ResMut<Assets<StandardMaterial>>,
@@ -396,11 +399,21 @@ pub(crate) fn generate_map(
         //     .map(|p| Vec2::new(0.0, 10.0))
         //     .collect();
 
+        let spline_height = 10.0;
+
+        for p in mountain_range.iter() {
+            commands.spawn((
+                Mesh3d(cube.clone()),
+                MeshMaterial3d(cube_color.clone()),
+                Transform::from_xyz(p[0], spline_height, p[1]),
+            ));
+        }
+
         let hermite = CubicHermite::new(mountain_range.clone(), tangets)
             .to_curve()
             .unwrap();
 
-        let positions: Vec<_> = hermite.iter_positions(200).collect();
+        let positions: Vec<_> = hermite.iter_positions(300).collect();
 
         let mut mountain_hexes = HashSet::new();
         let mut hill_hexes = HashSet::new();
@@ -412,7 +425,7 @@ pub(crate) fn generate_map(
 
         for mh in &mountain_hexes {
             hill_hexes.insert(*mh);
-            for n in mh.range(8) {
+            for n in mh.range(10) {
                 hill_hexes.insert(n);
             }
             // for n in mh.all_neighbors() {
@@ -433,14 +446,20 @@ pub(crate) fn generate_map(
                 }
 
                 // let offset = (mnoise.get([x as f64, y as f64])) as f32 * 2.0;
-                let f = (1.0 - (min_dis / (8.0)).min(1.0)).powf(1.2);
+                let f = (1.0 - (min_dis / (10.0)).min(1.0)).powf(2.0);
 
                 let h = (mnoise.get([x as f64, y as f64])) as f32;
-                let new_h = 5.0 * f + (1.0 - f) * oh + (f * (h + 1.0) * 2.0);
+                // let new_h = 2.5 * f + (1.0 - f) * oh + (f * (h + 1.0) * 2.0);
+                let new_h = 4.5 * f + (1.0 - f) * oh + (f * (h + 1.0) * 2.0);
                 new_h
             });
         }
         let sc = 0.2;
+        // let sc = 1.0;
+        // let my_gltf = asset_server.load("pinetree.glb#Scene0");
+        //
+        let tree_mesh = meshes.add(Cone::default());
+        let tree_mat = materials.add(Color::srgb(0.2, 0.36, 0.2));
         for (id, chunk) in &world.chunks {
             if let Some(reg) = world.regions.get(id) {
                 if reg.biome.kind != BiomeKind::Grasslands {
@@ -449,18 +468,38 @@ pub(crate) fn generate_map(
             }
             for v in &chunk.vertices {
                 let rnd = rng.gen_range(0_u32..10000);
-                if rnd > 10 {
-                    continue;
-                }
-                let p = Vec3::from_array(*v);
-                if p.y < 3.8 {
-                    commands.spawn((
-                        SceneRoot(
-                            asset_server
-                                .load(GltfAssetLabel::Scene(0).from_asset("tree/scene.gltf")),
-                        ),
-                        Transform::from_xyz(p.x, p.y, p.z).with_scale(Vec3::new(sc, sc, sc)),
-                    ));
+                if rnd < 4 {
+                    let p = Vec3::from_array(*v);
+                    if p.y < 2.0 {
+                        // commands.spawn(SceneBundle {
+                        //     scene: my_gltf,
+                        //     transform: Transform::from_xyz(2.0, 0.0, -5.0),
+                        //     ..Default::default()
+                        // });
+                        // commands.spawn((
+                        //     Mesh3d(tree_mesh.clone()), // SceneRoot(my_gltf.clone()),
+                        //     MeshMaterial3d(tree_mat.clone()),
+                        //     Transform::from_xyz(p.x, p.y + 0.2, p.z).with_scale(Vec3::new(
+                        //         sc,
+                        //         sc + 0.2,
+                        //         sc,
+                        //     )),
+                        // ));
+                        // commands.spawn((
+                        //     SceneRoot(
+                        //         asset_server
+                        //             .load(GltfAssetLabel::Scene(0).from_asset("tree/scene.gltf")),
+                        //     ),
+                        //     Transform::from_xyz(p.x, p.y, p.z).with_scale(Vec3::new(sc, sc, sc)),
+                        // ));
+                        commands.spawn((
+                            SceneRoot(
+                                asset_server
+                                    .load(GltfAssetLabel::Scene(0).from_asset("tree/scene.gltf")),
+                            ),
+                            Transform::from_xyz(p.x, p.y, p.z).with_scale(Vec3::new(sc, sc, sc)),
+                        ));
+                    }
                 }
             }
         }
@@ -468,8 +507,10 @@ pub(crate) fn generate_map(
         //     world.modify_tile(h, |_, _| 2.0);
         // }
 
-        let spline_positions: Vec<[f32; 3]> =
-            positions.into_iter().map(|p| [p.x, 10.0, p.y]).collect();
+        let spline_positions: Vec<[f32; 3]> = positions
+            .into_iter()
+            .map(|p| [p.x, spline_height, p.y])
+            .collect();
 
         let mut indices: Vec<u32> = Vec::new();
 
@@ -546,7 +587,10 @@ pub(crate) fn generate_map(
                 //     Mesh::ATTRIBUTE_COLOR,
                 //     vec![[r, g, b, 1.0]; hex_template_positions.len()],
                 // )
-                .with_computed_normals();
+                // .with_computed_smooth_normals()
+                .with_computed_normals()
+                .with_generated_tangents()
+                .unwrap();
             let mut rand_g = rng.gen_range(0.0_f32..0.2);
             let mut modc = 0.0;
             let color = Vec3::from(region.biome.kind.color());
@@ -559,9 +603,60 @@ pub(crate) fn generate_map(
                     mod_color: LinearRgba::new(modc, modc, modc, 1.0),
                 },
             });
+            let extended_mat = extended_materials.add(ExtendedMaterial {
+                base: StandardMaterial {
+                    base_color: WHITE.into(),
+                    // can be used in forward or deferred mode
+                    opaque_render_method: OpaqueRendererMethod::Auto,
+                    // in deferred mode, only the PbrInput can be modified (uvs, color and other material properties),
+                    // in forward mode, the output can also be modified after lighting is applied.
+                    // see the fragment shader `extended_material.wgsl` for more info.
+                    // Note: to run in deferred mode, you must also add a `DeferredPrepass` component to the camera and either
+                    // change the above to `OpaqueRendererMethod::Deferred` or add the `DefaultOpaqueRendererMethod` resource.
+                    ..Default::default()
+                },
+                extension: MyExtension {
+                    quantize_steps: 3,
+                    color: LinearRgba::new(color.x, color.y, color.z, 1.0),
+                    color_texture: Some(asset_server.load_with_settings(
+                        // "textures/grass01.png",
+                        "textures/ground2.png",
+                        |s: &mut _| {
+                            *s = ImageLoaderSettings {
+                                sampler: ImageSampler::Descriptor(ImageSamplerDescriptor {
+                                    // rewriting mode to repeat image,
+                                    address_mode_u: ImageAddressMode::Repeat,
+                                    address_mode_v: ImageAddressMode::Repeat,
+                                    ..default()
+                                }),
+                                ..default()
+                            }
+                        },
+                    )),
+                    color_texture2: Some(asset_server.load_with_settings(
+                        "textures/underground.png",
+                        |s: &mut _| {
+                            *s = ImageLoaderSettings {
+                                sampler: ImageSampler::Descriptor(ImageSamplerDescriptor {
+                                    // rewriting mode to repeat image,
+                                    address_mode_u: ImageAddressMode::Repeat,
+                                    address_mode_v: ImageAddressMode::Repeat,
+                                    ..default()
+                                }),
+                                ..default()
+                            }
+                        },
+                    )),
+                },
+            });
             commands.spawn((
                 Mesh3d(meshes.add(mesh)),
-                MeshMaterial3d(shader_mat.clone()),
+                MeshMaterial3d(extended_mat.clone()),
+                //
+                // MeshMaterial3d(materials.add(StandardMaterial {
+                //     base_color: LIMEGREEN.into(),
+                //     ..default()
+                // })),
                 Terrain,
             ));
         }
@@ -656,7 +751,6 @@ pub(crate) fn generate_map(
 
     //// Generate hexagon tile vertices ////
     let radius = HEX_RADIUS;
-    let subdivisions = 0;
     let (hex_template_positions, _uvs, hex_template_indices, _hex_vertex_weights) =
         generate_subdivided_hexagon(radius.into(), subdivisions);
 
@@ -935,7 +1029,7 @@ fn create_voronoi_regions(
         [world_corners[2], world_corners[3]],
         [world_corners[3], world_corners[0]],
     ];
-    let min_separation = 100.0;
+    let min_separation = 80.0;
     let points =
         Poisson2D::new().with_dimensions([world_width as f64, world_height as f64], min_separation);
     let mut triangulation: DelaunayTriangulation<_> = DelaunayTriangulation::new();

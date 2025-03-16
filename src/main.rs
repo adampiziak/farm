@@ -1,4 +1,5 @@
-use art::CustomMaterial;
+use art::{CustomMaterial, MyExtension};
+use bevy::color::palettes::css::WHITE;
 use bevy::prelude::*;
 
 use bevy::dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin};
@@ -73,6 +74,9 @@ fn main() {
             field1: Timer::from_seconds(4.0, TimerMode::Repeating),
         })
         .add_plugins(NoisyShaderPlugin)
+        .add_plugins(MaterialPlugin::<
+            ExtendedMaterial<StandardMaterial, MyExtension>,
+        >::default())
         .add_systems(Startup, terrain::generate_map)
         .add_systems(Startup, setup_lighting)
         .add_systems(Update, move_player)
@@ -86,6 +90,32 @@ fn setup_lighting(mut commands: Commands) {
         color: bevy::color::palettes::css::GHOST_WHITE.into(),
         brightness: 2_000.0,
     });
+    commands.spawn((
+        PointLight {
+            intensity: 100_000.0,
+            color: WHITE.into(),
+            shadows_enabled: true,
+            ..default()
+        },
+        Transform::from_xyz(0.0, 4.0, 0.0),
+    ));
+
+    commands.spawn((
+        DirectionalLight {
+            illuminance: 10_000.0,
+
+            shadows_enabled: true,
+            ..default()
+        },
+        Transform::from_xyz(0.0, 300.0, 0.0).looking_to(
+            Vec3 {
+                x: -0.2,
+                y: -0.1,
+                z: -0.2,
+            },
+            Vec3::Y,
+        ),
+    ));
 }
 
 #[derive(Debug, Component)]
@@ -181,8 +211,8 @@ fn setup_camera(mut commands: Commands) {
                 Transform::from_xyz(10., 30., 10.).looking_to(
                     Vec3 {
                         x: 0.0,
-                        y: -0.6,
-                        z: -0.3,
+                        y: -0.2,
+                        z: -0.9,
                     },
                     Vec3::Y,
                 ),
