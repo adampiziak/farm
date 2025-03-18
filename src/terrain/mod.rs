@@ -5,7 +5,7 @@ use bevy::{
     math::cubic_splines,
     pbr::{ExtendedMaterial, OpaqueRendererMethod},
     prelude::*,
-    render::mesh::{Indices, PrimitiveTopology},
+    render::mesh::{ConeMeshBuilder, CylinderMeshBuilder, Indices, PrimitiveTopology},
     utils::hashbrown::{HashMap, HashSet},
 };
 use biome::{Biome, BiomeKind};
@@ -28,6 +28,8 @@ use crate::{
 
 pub mod biome;
 pub mod erosion;
+
+const SUBDIVSIONS: usize = 2;
 
 #[derive(Default, Clone)]
 pub struct OldTile {
@@ -244,7 +246,7 @@ impl World {
     pub fn allocate_chunks(&mut self) {
         // Hexagon template
         let radius = HEX_RADIUS;
-        let subdivisions = 2;
+        let subdivisions = SUBDIVSIONS;
         let (hex_template_positions, _uvs, hex_template_indices, _hex_vertex_weights) =
             generate_subdivided_hexagon(radius.into(), subdivisions);
 
@@ -308,6 +310,11 @@ fn to_coord(a: Vec2) -> Coord {
     }
 }
 
+#[derive(Component)]
+pub struct TreeThingy {
+    pub position: Vec3,
+}
+
 // Generate Voronoi regions
 // Claims hex tiles for each regions
 // Use simplex noise for terrain generation
@@ -326,7 +333,9 @@ pub(crate) fn generate_map(
 
     // BIOMES
     for (_, region) in world.regions.iter_mut() {
+        // region.biome = Biome::random();
         region.biome = Biome::random();
+        region.biome.kind = BiomeKind::Grasslands;
     }
 
     // GENERAL TERRAIN
@@ -338,7 +347,7 @@ pub(crate) fn generate_map(
     let seed = rng.gen_range(0_u32..=1000000);
     let mnoise = BasicMulti::<SuperSimplex>::new(seed)
         .set_octaves(4)
-        .set_frequency(0.2);
+        .set_frequency(0.1);
 
     let amp = 2.0;
     for region in world.region_iter() {
@@ -361,7 +370,7 @@ pub(crate) fn generate_map(
     // let cube_tuple = (Mesh3d(cube.clone()), MeshMaterial3d(cube_color.clone()));
 
     // Draw mountain splines
-    for _ in 0..8 {
+    for _ in 0..4 {
         let mut mountain_range = Vec::new();
         let rand_x = rng.gen_range(MAP_SIZE[0]..MAP_SIZE[1]);
         let rand_y = rng.gen_range(MAP_SIZE[0]..MAP_SIZE[1]);
@@ -413,7 +422,7 @@ pub(crate) fn generate_map(
             .to_curve()
             .unwrap();
 
-        let positions: Vec<_> = hermite.iter_positions(300).collect();
+        let positions: Vec<_> = hermite.iter_positions(800).collect();
 
         let mut mountain_hexes = HashSet::new();
         let mut hill_hexes = HashSet::new();
@@ -435,42 +444,99 @@ pub(crate) fn generate_map(
             // }
         }
 
+        // let ranhh = rng.gen_range(0.8_f32..5.0);
+        let ranhh = 3.0;
         for h in hill_hexes {
             world.modify_tile(h, |x, oh, y| {
                 let mut min_dis = 1000.0;
                 for p in &positions {
-                    let dis = p.distance(Vec2::new(x, y));
+                    let dis = (p.distance(Vec2::new(x, y)) - 0.0).max(0.0);
                     if dis < min_dis {
                         min_dis = dis;
                     }
                 }
+                let tf = 1.0;
+                let ta = 1.0;
+                let to = 0.3;
+
+                // min_dis = (min_dis - to).max(0.0);
+
+                // if min_dis < ta {
+                //     min_dis /= tf;
+                // } else {
+                //     min_dis -= ta - ta / tf;
+                // }
 
                 // let offset = (mnoise.get([x as f64, y as f64])) as f32 * 2.0;
-                let f = (1.0 - (min_dis / (10.0)).min(1.0)).powf(2.0);
+                let f = (1.0 - (min_dis / (ranhh * 2.5)).min(1.0)).powf(1.8);
 
                 let h = (mnoise.get([x as f64, y as f64])) as f32;
                 // let new_h = 2.5 * f + (1.0 - f) * oh + (f * (h + 1.0) * 2.0);
-                let new_h = 4.5 * f + (1.0 - f) * oh + (f * (h + 1.0) * 2.0);
+                let new_h = ranhh * f + (1.0 - f) * oh + (f * (h + 1.0) * 2.0);
                 new_h
             });
         }
-        let sc = 0.2;
+        let sc = 0.04;
         // let sc = 1.0;
-        // let my_gltf = asset_server.load("pinetree.glb#Scene0");
+        // let my_gltf = asset_server.load("tree.glb#Scene0");
+        let fox_handle = asset_server.load(GltfAssetLabel::Scene(0).from_asset("tree2.glb"));
+
         //
-        let tree_mesh = meshes.add(Cone::default());
-        let tree_mat = materials.add(Color::srgb(0.2, 0.36, 0.2));
+        // let tree_mesh: Mesh = Cone::new(0.5, 2.0).into();
+        let tree_mesh: Mesh = ConeMeshBuilder::new(0.45, 3.0, 5).build();
+        // let tree_mesh: Mesh = Cylinder::default().into();
+        // let tree_mesh: Mesh = CylinderMeshBuilder::new(0.5, 2.0, 3).build();
+        let bevy::render::mesh::VertexAttributeValues::Float32x3(tree_vertices) =
+            tree_mesh.attribute(Mesh::ATTRIBUTE_POSITION).unwrap()
+        else {
+            return;
+        };
+        let tree_indices = tree_mesh.indices().unwrap();
+        // let tree_handle = meshes.add(tree_mesh);
+        // let tree_mat = materials.add(Color::srgb(0.2, 0.36, 0.2));
         for (id, chunk) in &world.chunks {
+            let mut forest_vertices = Vec::new();
+            let mut forest_uvs = Vec::new();
+            let mut forest_indices: Vec<u32> = Vec::new();
             if let Some(reg) = world.regions.get(id) {
                 if reg.biome.kind != BiomeKind::Grasslands {
                     continue;
                 }
             }
+            let mut ind_start = 0;
             for v in &chunk.vertices {
                 let rnd = rng.gen_range(0_u32..10000);
-                if rnd < 4 {
+                let co = 95.0 * 0.5_f32.powi(SUBDIVSIONS as i32);
+                if rnd < co as u32 {
                     let p = Vec3::from_array(*v);
                     if p.y < 2.0 {
+                        let rnd_h = rng.gen_range(-3.0_f32..4.0);
+                        for v in tree_vertices {
+                            forest_vertices.push([
+                                v[0] + p.x,
+                                v[1] + p.y + 1.0 + rnd_h,
+                                v[2] + p.z,
+                            ]);
+                            // forest_uvs.push([v[0] + p.x, v[2] + p.z]);
+                            forest_uvs.push([v[0] + p.x, v[1] + p.y]);
+                        }
+                        for ind in tree_indices.iter() {
+                            forest_indices.push((ind + ind_start) as u32);
+                        }
+                        ind_start += tree_vertices.len();
+                        for v in tree_vertices {
+                            forest_vertices.push([
+                                v[0] + p.x,
+                                v[1] + p.y + 1.0 + rnd_h + 1.0,
+                                v[2] + p.z,
+                            ]);
+                            forest_uvs.push([v[0] + p.x, v[1] + p.y]);
+                        }
+                        for ind in tree_indices.iter() {
+                            forest_indices.push((ind + ind_start) as u32);
+                        }
+                        ind_start += tree_vertices.len();
+                        // tree_mesh.with_duplicated_vertices()
                         // commands.spawn(SceneBundle {
                         //     scene: my_gltf,
                         //     transform: Transform::from_xyz(2.0, 0.0, -5.0),
@@ -485,23 +551,53 @@ pub(crate) fn generate_map(
                         //         sc,
                         //     )),
                         // ));
+                        let jitter = rng.gen_range(-2.0_f32..2.0);
+                        let jitterz = rng.gen_range(-2.0_f32..2.0);
+                        let vscale = rng.gen_range(1.0_f32..2.0);
+                        let hscale = rng.gen_range(0.8_f32..2.0);
+                        let rrot = rng.gen_range(-1.0_f32..1.0);
+                        commands.spawn((
+                            SceneRoot(fox_handle.clone()),
+                            TreeThingy { position: p },
+                            Visibility::Hidden,
+                            Transform::from_xyz(p.x + jitter, p.y, p.z + jitterz)
+                                .with_scale(Vec3::new(sc * hscale, sc * vscale, sc * hscale))
+                                .with_rotation(Quat::from_rotation_y(rrot)),
+                        ));
                         // commands.spawn((
-                        //     SceneRoot(
-                        //         asset_server
-                        //             .load(GltfAssetLabel::Scene(0).from_asset("tree/scene.gltf")),
-                        //     ),
+                        //     Mesh3d(fox_handle.clone_weak()),
+                        //     MeshMaterial3d(materials.add(Color::WHITE)),
                         //     Transform::from_xyz(p.x, p.y, p.z).with_scale(Vec3::new(sc, sc, sc)),
                         // ));
-                        commands.spawn((
-                            SceneRoot(
-                                asset_server
-                                    .load(GltfAssetLabel::Scene(0).from_asset("tree/scene.gltf")),
-                            ),
-                            Transform::from_xyz(p.x, p.y, p.z).with_scale(Vec3::new(sc, sc, sc)),
-                        ));
                     }
                 }
             }
+            let forest_mesh = Mesh::new(PrimitiveTopology::TriangleList, RenderAssetUsages::all())
+                .with_inserted_attribute(Mesh::ATTRIBUTE_POSITION, forest_vertices)
+                .with_inserted_attribute(Mesh::ATTRIBUTE_UV_0, forest_uvs)
+                .with_inserted_indices(Indices::U32(forest_indices));
+            // commands.spawn((
+            //     Mesh3d(meshes.add(forest_mesh)),
+            //     MeshMaterial3d(materials.add(StandardMaterial {
+            //         base_color: Color::srgb(0.8, 1.0, 0.8),
+            //         base_color_texture: Some(asset_server.load_with_settings(
+            //             "textures/grass01.png",
+            //             |s: &mut _| {
+            //                 *s = ImageLoaderSettings {
+            //                     sampler: ImageSampler::Descriptor(ImageSamplerDescriptor {
+            //                         // rewriting mode to repeat image,
+            //                         address_mode_u: ImageAddressMode::Repeat,
+            //                         address_mode_v: ImageAddressMode::Repeat,
+            //                         ..default()
+            //                     }),
+            //                     ..default()
+            //                 }
+            //             },
+            //         )),
+
+            //         ..Default::default()
+            //     })),
+            // ));
         }
         // for h in hill_hexes {
         //     world.modify_tile(h, |_, _| 2.0);
@@ -587,8 +683,8 @@ pub(crate) fn generate_map(
                 //     Mesh::ATTRIBUTE_COLOR,
                 //     vec![[r, g, b, 1.0]; hex_template_positions.len()],
                 // )
-                // .with_computed_smooth_normals()
-                .with_computed_normals()
+                .with_computed_smooth_normals()
+                // .with_computed_normals()
                 .with_generated_tangents()
                 .unwrap();
             let mut rand_g = rng.gen_range(0.0_f32..0.2);
@@ -613,6 +709,7 @@ pub(crate) fn generate_map(
                     // see the fragment shader `extended_material.wgsl` for more info.
                     // Note: to run in deferred mode, you must also add a `DeferredPrepass` component to the camera and either
                     // change the above to `OpaqueRendererMethod::Deferred` or add the `DefaultOpaqueRendererMethod` resource.
+                    perceptual_roughness: 0.9,
                     ..Default::default()
                 },
                 extension: MyExtension {
@@ -633,8 +730,37 @@ pub(crate) fn generate_map(
                             }
                         },
                     )),
-                    color_texture2: Some(asset_server.load_with_settings(
-                        "textures/underground.png",
+                    color2_texture: Some(asset_server.load_with_settings(
+                        // "textures/grass01.png",
+                        "textures/ground2_normal.png",
+                        |s: &mut _| {
+                            *s = ImageLoaderSettings {
+                                sampler: ImageSampler::Descriptor(ImageSamplerDescriptor {
+                                    // rewriting mode to repeat image,
+                                    address_mode_u: ImageAddressMode::Repeat,
+                                    address_mode_v: ImageAddressMode::Repeat,
+                                    ..default()
+                                }),
+                                ..default()
+                            }
+                        },
+                    )),
+                    mountain_texture: Some(asset_server.load_with_settings(
+                        "textures/mountain.png",
+                        |s: &mut _| {
+                            *s = ImageLoaderSettings {
+                                sampler: ImageSampler::Descriptor(ImageSamplerDescriptor {
+                                    // rewriting mode to repeat image,
+                                    address_mode_u: ImageAddressMode::Repeat,
+                                    address_mode_v: ImageAddressMode::Repeat,
+                                    ..default()
+                                }),
+                                ..default()
+                            }
+                        },
+                    )),
+                    mountain_normals: Some(asset_server.load_with_settings(
+                        "textures/mountain_normals.png",
                         |s: &mut _| {
                             *s = ImageLoaderSettings {
                                 sampler: ImageSampler::Descriptor(ImageSamplerDescriptor {
@@ -1029,7 +1155,7 @@ fn create_voronoi_regions(
         [world_corners[2], world_corners[3]],
         [world_corners[3], world_corners[0]],
     ];
-    let min_separation = 80.0;
+    let min_separation = 30.0;
     let points =
         Poisson2D::new().with_dimensions([world_width as f64, world_height as f64], min_separation);
     let mut triangulation: DelaunayTriangulation<_> = DelaunayTriangulation::new();

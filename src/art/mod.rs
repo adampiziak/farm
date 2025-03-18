@@ -42,7 +42,13 @@ pub struct MyExtension {
     pub color_texture: Option<Handle<Image>>,
     #[texture(104)]
     #[sampler(105)]
-    pub color_texture2: Option<Handle<Image>>,
+    pub color2_texture: Option<Handle<Image>>,
+    #[texture(106)]
+    #[sampler(107)]
+    pub mountain_texture: Option<Handle<Image>>,
+    #[texture(108)]
+    #[sampler(109)]
+    pub mountain_normals: Option<Handle<Image>>,
 }
 
 impl MaterialExtension for MyExtension {

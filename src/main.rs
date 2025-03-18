@@ -15,15 +15,20 @@ use bevy::{
 use misc::MapData;
 
 use noisy_bevy::NoisyShaderPlugin;
+use rand::{thread_rng, Rng};
+use terrain::TreeThingy;
 
 pub const HEX_RADIUS: f32 = 1.0;
 // pub const MAP_SIZE: [i32; 4] = [-200, 200, -200, 200];
-pub const MAP_SIZE: [i32; 4] = [-100, 100, -100, 100];
+// pub const MAP_SIZE: [i32; 4] = [-100, 100, -100, 100];
 pub const SHARE_VERTICES: bool = false;
 // const MAP_SIZE: [i32; 4] = [-300, 300, -300, 300];
 // pub const MAP_SIZE: [i32; 4] = [-400, 400, -400, 400];
 // const MAP_SIZE: [i32; 4] = [-150, 150, -150, 150];
-// const MAP_SIZE: [i32; 4] = [-50, 50, -50, 50];
+const MAP_SIZE: [i32; 4] = [-50, 50, -50, 50];
+// const MAP_SIZE: [i32; 4] = [-30, 30, -30, 30];
+// const MAP_SIZE: [i32; 4] = [-20, 20, -20, 20];
+// const MAP_SIZE: [i32; 4] = [-80, 80, -80, 80];
 
 mod art;
 mod math;
@@ -82,23 +87,53 @@ fn main() {
         .add_systems(Update, move_player)
         .add_systems(Startup, setup_camera)
         .add_systems(Update, toggle_wireframe)
+        .add_systems(Update, tree_visible)
         .run();
+}
+
+/// When everything is ready, un-hide the game map
+fn tree_visible(
+    mut query: Query<(&mut Visibility, &TreeThingy)>,
+    player: Query<&Transform, With<Player>>,
+) {
+    // let mut rng = thread_rng();
+    // let mut i = 0;
+    let rad = 32.0;
+    if let Ok(ply) = player.get_single() {
+        let mut player_pos = ply.translation.xz();
+        player_pos[1] -= rad * 0.8;
+        player_pos[0] += 10.0;
+
+        // ply.translation
+        for (mut vis, thingy) in &mut query {
+            if thingy.position.xz().distance(player_pos) < rad {
+                // if thingy
+                // let num = rng.gen_range(0_u32..100);
+
+                *vis = Visibility::Visible;
+            } else {
+                *vis = Visibility::Hidden;
+            }
+        }
+    }
+    // let num = rng.gen_range(0_u32..100);
+    // let mut vis_map = query.get_many_mut(entities)
 }
 
 fn setup_lighting(mut commands: Commands) {
     commands.insert_resource(AmbientLight {
         color: bevy::color::palettes::css::GHOST_WHITE.into(),
-        brightness: 2_000.0,
+        brightness: 200.0,
     });
-    commands.spawn((
-        PointLight {
-            intensity: 100_000.0,
-            color: WHITE.into(),
-            shadows_enabled: true,
-            ..default()
-        },
-        Transform::from_xyz(0.0, 4.0, 0.0),
-    ));
+    // commands.spawn((
+    //     PointLight {
+    //         intensity: 100_000.0,
+    //         color: WHITE.into(),
+    //         shadows_enabled: true,
+    //         ..default()
+    //     },
+    //     Transform::from_xyz(0.0, 4.0, 0.0),
+    // ));
 
     commands.spawn((
         DirectionalLight {
@@ -110,8 +145,8 @@ fn setup_lighting(mut commands: Commands) {
         Transform::from_xyz(0.0, 300.0, 0.0).looking_to(
             Vec3 {
                 x: -0.2,
-                y: -0.1,
-                z: -0.2,
+                y: -0.2,
+                z: 0.2,
             },
             Vec3::Y,
         ),
@@ -132,14 +167,14 @@ fn move_player(input: Res<ButtonInput<KeyCode>>, mut player: Query<&mut Transfor
     // jjjj
     let translation = transform.translation;
 
-    let step = 0.35;
+    let step = 0.55;
     if input.pressed(KeyCode::KeyW) {
         transform.translation = Vec3 {
             z: translation.z - step,
             ..translation
         };
     }
-    let rotate_step = 0.001;
+    let rotate_step = 0.01;
     if input.pressed(KeyCode::ShiftLeft) {
         transform.translation = Vec3 {
             y: translation.y - step / 2.,
