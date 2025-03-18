@@ -29,7 +29,7 @@ use crate::{
 pub mod biome;
 pub mod erosion;
 
-const SUBDIVSIONS: usize = 2;
+const SUBDIVSIONS: usize = 1;
 
 #[derive(Default, Clone)]
 pub struct OldTile {
@@ -476,7 +476,7 @@ pub(crate) fn generate_map(
                 new_h
             });
         }
-        let sc = 0.04;
+        let sc = 0.05;
         // let sc = 1.0;
         // let my_gltf = asset_server.load("tree.glb#Scene0");
         let fox_handle = asset_server.load(GltfAssetLabel::Scene(0).from_asset("tree2.glb"));
@@ -553,8 +553,8 @@ pub(crate) fn generate_map(
                         // ));
                         let jitter = rng.gen_range(-2.0_f32..2.0);
                         let jitterz = rng.gen_range(-2.0_f32..2.0);
-                        let vscale = rng.gen_range(1.0_f32..2.0);
-                        let hscale = rng.gen_range(0.8_f32..2.0);
+                        let vscale = rng.gen_range(0.8_f32..1.2);
+                        let hscale = rng.gen_range(0.8_f32..1.2);
                         let rrot = rng.gen_range(-1.0_f32..1.0);
                         commands.spawn((
                             SceneRoot(fox_handle.clone()),
