@@ -29,7 +29,7 @@ use crate::{
 pub mod biome;
 pub mod erosion;
 
-const SUBDIVSIONS: usize = 1;
+const SUBDIVSIONS: usize = 2;
 
 #[derive(Default, Clone)]
 pub struct OldTile {
@@ -476,10 +476,11 @@ pub(crate) fn generate_map(
                 new_h
             });
         }
-        let sc = 0.05;
+        // let sc = 0.05;
+        let sc = 0.2;
         // let sc = 1.0;
         // let my_gltf = asset_server.load("tree.glb#Scene0");
-        let fox_handle = asset_server.load(GltfAssetLabel::Scene(0).from_asset("tree2.glb"));
+        // let fox_handle = asset_server.load(GltfAssetLabel::Scene(0).from_asset("tree2.glb"));
 
         //
         // let tree_mesh: Mesh = Cone::new(0.5, 2.0).into();
@@ -506,7 +507,7 @@ pub(crate) fn generate_map(
             let mut ind_start = 0;
             for v in &chunk.vertices {
                 let rnd = rng.gen_range(0_u32..10000);
-                let co = 95.0 * 0.5_f32.powi(SUBDIVSIONS as i32);
+                let co = 55.0 * 0.5_f32.powi(SUBDIVSIONS as i32);
                 if rnd < co as u32 {
                     let p = Vec3::from_array(*v);
                     if p.y < 2.0 {
@@ -557,13 +558,24 @@ pub(crate) fn generate_map(
                         let hscale = rng.gen_range(0.8_f32..1.2);
                         let rrot = rng.gen_range(-1.0_f32..1.0);
                         commands.spawn((
-                            SceneRoot(fox_handle.clone()),
+                            SceneRoot(
+                                asset_server
+                                    .load(GltfAssetLabel::Scene(0).from_asset("tree/scene.gltf")),
+                            ),
                             TreeThingy { position: p },
                             Visibility::Hidden,
                             Transform::from_xyz(p.x + jitter, p.y, p.z + jitterz)
-                                .with_scale(Vec3::new(sc * hscale, sc * vscale, sc * hscale))
+                                .with_scale(Vec3::new(sc, sc, sc))
                                 .with_rotation(Quat::from_rotation_y(rrot)),
                         ));
+                        // commands.spawn((
+                        //     SceneRoot(fox_handle.clone()),
+                        //     TreeThingy { position: p },
+                        //     Visibility::Hidden,
+                        //     Transform::from_xyz(p.x + jitter, p.y, p.z + jitterz)
+                        //         .with_scale(Vec3::new(sc * hscale, sc * vscale, sc * hscale))
+                        //         .with_rotation(Quat::from_rotation_y(rrot)),
+                        // ));
                         // commands.spawn((
                         //     Mesh3d(fox_handle.clone_weak()),
                         //     MeshMaterial3d(materials.add(Color::WHITE)),

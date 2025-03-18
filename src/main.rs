@@ -98,10 +98,10 @@ fn tree_visible(
 ) {
     // let mut rng = thread_rng();
     // let mut i = 0;
-    let rad = 16.0;
+    let rad = 32.0;
     if let Ok(ply) = player.get_single() {
         let mut player_pos = ply.translation.xz();
-        player_pos[1] -= rad * 1.8;
+        player_pos[1] -= rad * 1.0;
         player_pos[0] += 10.0;
 
         // ply.translation
