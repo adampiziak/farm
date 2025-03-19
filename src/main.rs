@@ -1,5 +1,6 @@
 use art::{CustomMaterial, MyExtension};
-use bevy::color::palettes::css::WHITE;
+use bevy::color::palettes::css::{ANTIQUE_WHITE, GHOST_WHITE, RED, WHITE};
+use bevy::image::{ImageAddressMode, ImageLoaderSettings, ImageSampler, ImageSamplerDescriptor};
 use bevy::prelude::*;
 
 use bevy::dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin};
@@ -25,9 +26,9 @@ pub const SHARE_VERTICES: bool = false;
 // const MAP_SIZE: [i32; 4] = [-300, 300, -300, 300];
 // pub const MAP_SIZE: [i32; 4] = [-400, 400, -400, 400];
 // const MAP_SIZE: [i32; 4] = [-150, 150, -150, 150];
-const MAP_SIZE: [i32; 4] = [-50, 50, -50, 50];
+// const MAP_SIZE: [i32; 4] = [-50, 50, -50, 50];
 // const MAP_SIZE: [i32; 4] = [-30, 30, -30, 30];
-// const MAP_SIZE: [i32; 4] = [-20, 20, -20, 20];
+const MAP_SIZE: [i32; 4] = [-20, 20, -20, 20];
 // const MAP_SIZE: [i32; 4] = [-80, 80, -80, 80];
 
 mod art;
@@ -84,11 +85,71 @@ fn main() {
         >::default())
         .add_systems(Startup, terrain::generate_map)
         .add_systems(Startup, setup_lighting)
+        // .add_systems(Startup, setup_cube)
         .add_systems(Update, move_player)
         .add_systems(Startup, setup_camera)
         .add_systems(Update, toggle_wireframe)
         .add_systems(Update, tree_visible)
         .run();
+}
+
+fn setup_cube(
+    mut commands: Commands,
+    mut materials: ResMut<Assets<StandardMaterial>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    asset_server: Res<AssetServer>,
+) {
+    let normal_handle = asset_server.load_with_settings(
+        "textures/cube_normal.png",
+        // The normal map texture is in linear color space. Lighting won't look correct
+        // if `is_srgb` is `true`, which is the default.
+        |settings: &mut ImageLoaderSettings| settings.is_srgb = false,
+    );
+    let parallax_depth_scale = 0.2;
+    let max_parallax_layer_count = ops::exp2(5.0);
+    let parallax_mapping_method = ParallaxMappingMethod::Occlusion;
+
+    let parallax_material = materials.add(StandardMaterial {
+        perceptual_roughness: 0.4,
+        base_color_texture: Some(asset_server.load("textures/cube_color.png")),
+        normal_map_texture: Some(normal_handle),
+        // The depth map is a grayscale texture where black is the highest level and
+        // white the lowest.
+        // depth_map: Some(asset_server.load("textures/parallax_example/cube_depth.png")),
+        // depth_map: Some(asset_server.load("textures/mountain_displacement.png")),
+        depth_map: Some(asset_server.load_with_settings(
+            // "textures/grass01.png",
+            "textures/cube_depth.png",
+            |s: &mut _| {
+                *s = ImageLoaderSettings {
+                    sampler: ImageSampler::Descriptor(ImageSamplerDescriptor {
+                        // rewriting mode to repeat image,
+                        address_mode_u: ImageAddressMode::Repeat,
+                        address_mode_v: ImageAddressMode::Repeat,
+                        ..default()
+                    }),
+                    ..default()
+                }
+            },
+        )),
+        parallax_depth_scale,
+        parallax_mapping_method,
+        max_parallax_layer_count,
+        ..default()
+    });
+    commands.spawn((
+        Mesh3d(
+            meshes.add(
+                // NOTE: for normal maps and depth maps to work, the mesh
+                // needs tangents generated.
+                Mesh::from(Cuboid::default())
+                    .with_generated_tangents()
+                    .unwrap(),
+            ),
+        ),
+        MeshMaterial3d(parallax_material.clone()),
+        Transform::from_xyz(0.0, 20.0, 0.0),
+    ));
 }
 
 /// When everything is ready, un-hide the game map
@@ -98,7 +159,7 @@ fn tree_visible(
 ) {
     // let mut rng = thread_rng();
     // let mut i = 0;
-    let rad = 32.0;
+    let rad = 62.0;
     if let Ok(ply) = player.get_single() {
         let mut player_pos = ply.translation.xz();
         player_pos[1] -= rad * 1.0;
@@ -121,23 +182,36 @@ fn tree_visible(
 }
 
 fn setup_lighting(mut commands: Commands) {
-    commands.insert_resource(AmbientLight {
-        color: bevy::color::palettes::css::GHOST_WHITE.into(),
-        brightness: 200.0,
-    });
+    // commands.insert_resource(AmbientLight {
+    //     color: bevy::color::palettes::css::NAVAJO_WHITE.into(),
+
+    //     brightness: 100.0,
+    // });
     // commands.spawn((
     //     PointLight {
     //         intensity: 100_000.0,
     //         color: WHITE.into(),
     //         shadows_enabled: true,
+    //         range: 100.0,
+
     //         ..default()
     //     },
-    //     Transform::from_xyz(0.0, 4.0, 0.0),
+    //     Transform::from_xyz(0.0, 40.0, 0.0),
+    // ));
+    // commands.spawn((
+    //     PointLight {
+    //         intensity: 1_000_000.0,
+    //         color: WHITE.into(),
+    //         shadows_enabled: true,
+    //         range: 100.0,
+    //         ..default()
+    //     },
+    //     Transform::from_xyz(1.0, 10.0, 0.0),
     // ));
 
     commands.spawn((
         DirectionalLight {
-            illuminance: 10_000.0,
+            illuminance: 8_000.0,
 
             shadows_enabled: true,
             ..default()
@@ -145,7 +219,7 @@ fn setup_lighting(mut commands: Commands) {
         Transform::from_xyz(0.0, 300.0, 0.0).looking_to(
             Vec3 {
                 x: -0.2,
-                y: -0.2,
+                y: -0.16,
                 z: 0.2,
             },
             Vec3::Y,
@@ -232,17 +306,11 @@ fn setup_camera(mut commands: Commands) {
             Visibility::default(),
         ))
         .with_children(|parent| {
-            parent.spawn((WorldModelCamera,));
+            // parent.spawn((WorldModelCamera,));
 
             // Spawn view model camera.
             parent.spawn((
                 Camera3d::default(),
-                Camera {
-                    // Bump the order to render on top of the world model.
-                    order: 1,
-
-                    ..default()
-                },
                 Transform::from_xyz(10., 30., 10.).looking_to(
                     Vec3 {
                         x: 0.0,

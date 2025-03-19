@@ -86,10 +86,11 @@ fn fragment(
     let s = vec2(1, 1.7320508);
     let p = abs(uv - cen);
     var c = max(dot(p, s * 0.5), p.x);
-    let co = 0.82;
+    let co = 0.83;
     if c > co {
         c = 0.0 + (c - co) * 5.0;
-        c = c*8.0;
+        c = c*10.0;
+        // c = c*8.0;
         // c = 2.0;
         // c = 0.0;
     } else {
@@ -104,7 +105,8 @@ fn fragment(
     var h = in.world_position[1] + 0.5;
     var f = 1.0/(1.0 + h*h*h*h/32.0);
     var new_in = in;
-    new_in.world_normal += mix(mountain_norms.xyz, grass_norms.xyz, f)*3.0;
+    new_in.world_normal += mix(mountain_norms.xyz, grass_norms.xyz, f)*1.0;
+    // new_in.world_position += mix(mountain_norms, grass_norms, f)*10.0;
     // new_in.world_tangent += mountain_norms;
     var pbr_input = pbr_input_from_standard_material(new_in, is_front);
     pbr_input.material.base_color = mix(material_color, mix(mountain, grass, f), 1.0);
@@ -129,9 +131,12 @@ fn fragment(
     // // pbr_input.material.base_color += (h-hco)/4.0;
     // // pbr_input.material.base_color = 0.2;
     // } 
-    pbr_input.material.base_color.z += c/2.0;
-    pbr_input.material.base_color.x += c/3.0;
-    pbr_input.material.base_color.y += c/3.0;
+    pbr_input.material.base_color += c/2.0;
+    // pbr_input.material.base_color.x += c/3.0;
+    // pbr_input.material.base_color.y += c/3.0;
+    // pbr_input.material.base_color.x -= c/16.0;
+    // pbr_input.material.base_color.y -= c/16.0;
+    // pbr_input.material.base_color.z -= c/4.0;
     var out: FragmentOutput;
     // apply lighting
     out.color = apply_pbr_lighting(pbr_input);
@@ -147,6 +152,8 @@ fn fragment(
 
     // we can optionally modify the final result here
     // out.color = out.color * 2.0;
+    // out.color += c/32.0;
+    // out.color[3] -= c*0.2;
 // #endif
 
     return out;
