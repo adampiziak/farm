@@ -13,7 +13,9 @@ use bevy::{
 };
 use biome::{Biome, BiomeKind};
 use fast_poisson::Poisson2D;
-use geo::{coord, Contains, Coord, LineString};
+use geo::{
+    coord, point, Contains, Coord, Distance, EuclideanDistance, HausdorffDistance, LineString,
+};
 use noise::{BasicMulti, MultiFractal, NoiseFn, SuperSimplex};
 use rand::Rng;
 use spade::{handles::VoronoiVertex, DelaunayTriangulation, Point2, Triangulation};
@@ -350,7 +352,7 @@ pub(crate) fn generate_map(
     let seed = rng.gen_range(0_u32..=1000000);
     let mnoise = BasicMulti::<SuperSimplex>::new(seed)
         .set_octaves(4)
-        .set_frequency(0.1);
+        .set_frequency(0.08);
     let peak_noise = BasicMulti::<SuperSimplex>::new(seed)
         .set_octaves(4)
         .set_frequency(0.8);
@@ -429,7 +431,14 @@ pub(crate) fn generate_map(
             .to_curve()
             .unwrap();
 
-        let positions: Vec<_> = hermite.iter_positions(1600).collect();
+        let positions: Vec<_> = hermite.iter_positions(8 * 20).collect();
+        let mut lines = Vec::new();
+        for i in 0..positions.len() - 1 {
+            let p1 = positions[i];
+            let p2 = positions[i + 1];
+            let l = geo::Line::new(to_coord(p1), to_coord(p2));
+            lines.push(l);
+        }
 
         let mut mountain_hexes = HashSet::new();
         let mut hill_hexes = HashSet::new();
@@ -452,38 +461,44 @@ pub(crate) fn generate_map(
         }
 
         // let ranhh = rng.gen_range(0.8_f32..5.0);
-        let ranhh = 4.0;
+        let ranhh = 5.0;
         for h in hill_hexes {
             world.modify_tile(h, |x, oh, y| {
-                let mut min_dis = 1000.0;
-                for p in &positions {
-                    let dis = (p.distance(Vec2::new(x, y)) - 0.0).max(0.0);
+                let mut min_dis: f32 = 1000.0;
+                for l in &lines {
+                    let c = coord! {x: x as f64,  y: y as f64};
+                    // let p = geo::Point::from(c);
+                    let dis = l.euclidean_distance(&c) as f32;
+                    // let dis = (p.distance(Vec2::new(x, y)) - 0.0).max(0.0);
                     if dis < min_dis {
                         min_dis = dis;
                     }
                 }
-                let tf = 2.0;
-                let ta = 5.0;
-                let to = 0.2;
+                let tf = 1.1;
+                let ta = 0.3;
+                let to = 0.1;
                 // let power_factor = 1.9;
 
-                // min_dis = (min_dis - to).max(0.0);
+                min_dis = (min_dis - to).max(0.0);
 
                 // let mut peak_displace = 0.0;
 
-                // if min_dis < ta {
-                //     //     // min_dis = min_dis.powf(power_factor);
-                //     peak_displace = (ta - min_dis).max(0.0)
-                //         * (peak_noise.get([x as f64, y as f64]) as f32)
-                //         * 0.02;
-                // }
+                if min_dis < ta {
+                    min_dis /= tf;
+                    //     //     // min_dis = min_dis.powf(power_factor);
+                    // min_dis -= (ta - min_dis).powf(2.0);
+                    //         * (peak_noise.get([x as f64, y as f64]) as f32)
+                    //         * 0.02;
+                } else {
+                    min_dis -= ta - ta / tf;
+                }
 
                 // let offset = (mnoise.get([x as f64, y as f64])) as f32 * 2.0;
-                let f = (1.0 - (min_dis / (ranhh * 2.0)).min(1.0)).powf(1.8);
+                let f = (1.0 - (min_dis / (ranhh * 2.2)).min(1.0)).powf(2.2);
 
                 let h = (mnoise.get([x as f64, y as f64])) as f32;
                 // let new_h = 2.5 * f + (1.0 - f) * oh + (f * (h + 1.0) * 2.0);
-                let new_h = ranhh * f + (1.0 - f) * oh + (f * (h + 1.0) * 2.0);
+                let new_h = ranhh * f + (1.0 - f) * oh + (f * (h + 0.5) * 3.0);
                 new_h
             });
         }
@@ -566,7 +581,7 @@ pub(crate) fn generate_map(
             let co = 425.0 * 0.3_f32.powi(SUBDIVSIONS as i32);
             if rnd < co as u32 {
                 let p = Vec3::from_array(*v);
-                if p.y < 3.0 && p.y > 0.2 {
+                if p.y < 3.0 && p.y > 0.3 {
                     let rnd_h = rng.gen_range(-3.0_f32..4.0);
                     for v in tree_vertices {
                         forest_vertices.push([v[0] + p.x, v[1] + p.y + 1.0 + rnd_h, v[2] + p.z]);

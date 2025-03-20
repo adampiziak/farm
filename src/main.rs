@@ -27,8 +27,8 @@ pub const SHARE_VERTICES: bool = false;
 // pub const MAP_SIZE: [i32; 4] = [-400, 400, -400, 400];
 // const MAP_SIZE: [i32; 4] = [-150, 150, -150, 150];
 // const MAP_SIZE: [i32; 4] = [-50, 50, -50, 50];
-// const MAP_SIZE: [i32; 4] = [-30, 30, -30, 30];
-const MAP_SIZE: [i32; 4] = [-20, 20, -20, 20];
+const MAP_SIZE: [i32; 4] = [-30, 30, -30, 30];
+// const MAP_SIZE: [i32; 4] = [-20, 20, -20, 20];
 // const MAP_SIZE: [i32; 4] = [-80, 80, -80, 80];
 
 mod art;
