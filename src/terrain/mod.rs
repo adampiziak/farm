@@ -320,6 +320,9 @@ pub struct TreeThingy {
     pub position: Vec3,
 }
 
+// LOD ATTEMP
+pub(crate) fn generate_lod_world() {}
+
 // Generate Voronoi regions
 // Claims hex tiles for each regions
 // Use simplex noise for terrain generation

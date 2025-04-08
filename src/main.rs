@@ -83,7 +83,8 @@ fn main() {
         .add_plugins(MaterialPlugin::<
             ExtendedMaterial<StandardMaterial, MyExtension>,
         >::default())
-        .add_systems(Startup, terrain::generate_map)
+        // .add_systems(Startup, terrain::generate_map)
+        .add_systems(Startup, terrain::generate_lod_world)
         .add_systems(Startup, setup_lighting)
         // .add_systems(Startup, setup_cube)
         .add_systems(Update, move_player)
